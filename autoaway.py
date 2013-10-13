@@ -408,7 +408,7 @@ def init():
   global GITHUB, ANALYTICS, VERSION
 
   GITHUB = "https://raw.github.com/MilhouseVH/autoaway.py/master/"
-  ANALYTICS = "http://goo.gl/NTa9eB"
+  ANALYTICS = "http://goo.gl/k5zXRF"
   VERSION = "0.0.1"
 
   parser = argparse.ArgumentParser(description="Manage auto-away status based on presence of mobile devices",
