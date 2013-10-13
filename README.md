@@ -11,14 +11,14 @@ Any number of devices can be monitored, using either hostname or IPv4 address. A
 
 Off-peak hours can be specified during which time device monitoring will be disabled, for instance between the hours of 01:00 and 08:00 it could be assumed the occupants are asleep, and there is no need to continue pinging devices. Of course if nobody is home during these hours, monitoring will continue until at least one device returns home, and then monitoring will be disabled until the end of the off-peak period.
 
-Independent occupancy and vacancy frequencies can be specified, by default a short vacancy frequency will be used to detect returning devices as quickly as possible.
+Independent occupancy and vacancy frequencies can be specified, by default a shorter vacated frequency will be used to detect returning devices as quickly as possible.
 
 Devices will be pinged in random order to minimise communication with any single device, or a strict left-to-right sequence may be selected.
 
 ####Usage:
 ```
 autoaway.py [-h] [-d DEVICE [DEVICE ...]] [-g MINUTES] [-ops HH:MM] [-ope HH:MM]
-                   [-so SECONDS] [-sv SECONDS] [-n FILENAME] [--noarp] [--noreverse]
+                   [-os SECONDS] [-vs SECONDS] [-n FILENAME] [--noarp] [--noreverse]
                    [--norandom] [--version | --nocheck] [--update | --fupdate] [-v]
 
 Manage auto-away status based on presence of mobile devices
@@ -33,10 +33,10 @@ optional arguments:
                          Off peak period start, eg. 01:00
   -ope HH:MM, --offpeakend HH:MM
                          Off peak period end, eg. 08:00
-  -so SECONDS, --sleep-occupied SECONDS
-                         Sleep interval while oocupied
-  -sv SECONDS, --sleep-vacant SECONDS
-                         Sleep interval while vacant
+  -os SECONDS, --occupied-sleep SECONDS
+                         Sleep interval while property is oocupied
+  -vs SECONDS, --vacant-sleep SECONDS
+                         Sleep interval while property is vacated
   -n FILENAME, --notify FILENAME
                          Execute FILENAME when change of occupancy occurs - passed "here"
                          or "away" as argument
@@ -52,12 +52,11 @@ Version upgrades:
   --fupdate              Force update to latest version (irrespective of current version)
 ```
 
-
 ####Default values:
 ```
 --grace           15  (minutes)
---sleep-occupied  900 (seconds)
---sleep-vacant    15  (seconds)
+--occupied-sleep  900 (seconds)
+--vacant-sleep    15  (seconds)
 ```
 
 ####Example usage:

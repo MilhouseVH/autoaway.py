@@ -44,7 +44,7 @@ else:
 class AutoAway(object):
   def __init__( self, devices, use_arp=True, grace_period=30, notify=None,
                     off_peak_start=None, off_peak_end=None,
-                    sleep_occupied=15*60, sleep_vacant=15,
+                    occupied_sleep=15*60, vacant_sleep=15,
                     verbose=False, reverse=True, randomise=True):
 
     self.devices = devices
@@ -54,8 +54,8 @@ class AutoAway(object):
     self.off_peak_start = self.time_to_tuple(off_peak_start)
     self.off_peak_end = self.time_to_tuple(off_peak_end)
     self.grace_period_secs = grace_period * 60
-    self.sleep_occupied = sleep_occupied
-    self.sleep_vacant = sleep_vacant
+    self.occupied_sleep = occupied_sleep
+    self.vacant_sleep = vacant_sleep
     self.verbose = verbose
     self.reverse = reverse
     self.randomise = randomise
@@ -67,8 +67,8 @@ class AutoAway(object):
       self.debug("Off Peak: %s -> %s" % (off_peak_start, off_peak_end))
     else:
       self.debug("Off Peak: Not set")
-    self.debug("Sleep interval when occupied: %d secs" % sleep_occupied)
-    self.debug("Sleep Interval when vacant:   %d secs" % sleep_vacant)
+    self.debug("Sleep interval when occupied: %d secs" % occupied_sleep)
+    self.debug("Sleep Interval when vacant:   %d secs" % vacant_sleep)
     self.debug("=" * 50)
 
     self.last_seen = 0
@@ -201,7 +201,7 @@ class AutoAway(object):
         response = subprocess.check_output([self.notify, value], stderr=subprocess.STDOUT).decode("utf-8")
         if response:
           self.debug("** Start of response **")
-          self.debug("########## %s ############" % response[:-1])
+          self.debug("%s" % response[:-(len(os.linesep))])
           self.debug("** End of response **")
       except subprocess.CalledProcessError as e:
         self.log("#### BEGIN EXCEPTION #####")
@@ -211,7 +211,7 @@ class AutoAway(object):
 
   def Wait(self):
     offpeak = False
-    sleep_time = self.sleep_occupied
+    sleep_time = self.occupied_sleep
 
     if self.DevicesSeen():
       # When property is occupied during off peak hours, sleep for longer
@@ -229,7 +229,7 @@ class AutoAway(object):
           offpeak = True
           sleep_time = ((e[0] - hour_min[0])*60*60) + (e[1] - hour_min[1])*60
     else:
-      sleep_time = self.sleep_vacant
+      sleep_time = self.vacant_sleep
 
     if self.verbose:
       self.debug("Sleeping for %d seconds (%s)%s" %
@@ -408,7 +408,7 @@ def init():
   global GITHUB, ANALYTICS, VERSION
 
   GITHUB = "https://raw.github.com/MilhouseVH/autoaway.py/master/"
-  ANALYTICS = "http://goo.gl/k5zXRF"
+  ANALYTICS = "http://goo.gl/ZTe1mN"
   VERSION = "0.0.1"
 
   parser = argparse.ArgumentParser(description="Manage auto-away status based on presence of mobile devices",
@@ -425,10 +425,10 @@ def init():
   parser.add_argument("-ope", "--offpeakend", metavar="HH:MM", \
                       help="Off peak period end, eg. 08:00")
 
-  parser.add_argument("-so", "--sleep-occupied", metavar="SECONDS", type=int, default=15*60, \
-                      help="Sleep interval while oocupied")
-  parser.add_argument("-sv", "--sleep-vacant", metavar="SECONDS", type=int, default=15, \
-                      help="Sleep interval while vacant")
+  parser.add_argument("-os", "--occupied-sleep", metavar="SECONDS", type=int, default=15*60, \
+                      help="Sleep interval while property is oocupied")
+  parser.add_argument("-vs", "--vacant-sleep", metavar="SECONDS", type=int, default=15, \
+                      help="Sleep interval while property is vacated")
 
   parser.add_argument("-n", "--notify", metavar="FILENAME", \
                       help="Execute FILENAME when change of occupancy occurs - passed \
@@ -482,7 +482,7 @@ def init():
 def main(args):
   autoaway = AutoAway(args.devices, not args.noarp, args.grace, args.notify,
                       args.offpeakstart, args.offpeakend,
-                      args.sleep_occupied, args.sleep_vacant,
+                      args.occupied_sleep, args.vacant_sleep,
                       verbose=args.verbose, reverse=not args.noreverse,
                       randomise=not args.norandom)
 
