@@ -19,9 +19,9 @@ Devices will be pinged in random order to minimise communication with any single
 ```
 autoaway.py [-h] [-d DEVICE [DEVICE ...]] [-g MINUTES] [-ops HH:MM] [-ope HH:MM]
                    [-so SECONDS] [-sv SECONDS] [-n FILENAME] [--noarp] [--noreverse]
-                   [--norandom] [-v] [--version] [--nocheck] [--update] [--fupdate]
+                   [--norandom] [--version | --nocheck] [--update | --fupdate] [-v]
 
-Manage auto-away status for Nest Thermostat
+Manage auto-away status based on presence of mobile devices
 
 optional arguments:
   -h, --help             show this help message and exit
@@ -43,9 +43,11 @@ optional arguments:
   --noarp                Do not try to find devices in ARP cache
   --noreverse            No reverse lookup on device names
   --norandom             Do not randomise device pings - ping using left-to-right order
-  -v, --verbose          Display diagnostic output
-  --version              Check current version and see if a new version is available
+  --version              Check current version, and if a new version is available
   --nocheck              Do not check if a new version is available
+  -v, --verbose          Display diagnostic output
+
+Version upgrades:
   --update               Update to latest version (if required)
   --fupdate              Force update to latest version (irrespective of current version)
 ```
