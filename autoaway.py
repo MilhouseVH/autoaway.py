@@ -35,6 +35,7 @@ import datetime
 import argparse
 import random
 import hashlib
+import re
 
 if sys.version_info >= (3, 0):
   import urllib.request as urllib2
@@ -42,27 +43,28 @@ else:
   import urllib2
 
 class AutoAway(object):
-  def __init__( self, devices, use_arp=True, grace_period=30, notify=None,
+  def __init__( self, devices, use_arp=True, pings=1, grace_period=30, notify=None,
                     off_peak_start=None, off_peak_end=None,
                     occupied_sleep=15*60, vacant_sleep=15,
                     verbose=False, reverse=True, randomise=True):
 
     self.devices = devices
     self.use_arp = use_arp
-    self.grace_period = grace_period
+    self.pings = int(pings)
+    self.grace_period = int(grace_period)
     self.notify = notify
     self.off_peak_start = self.time_to_tuple(off_peak_start)
     self.off_peak_end = self.time_to_tuple(off_peak_end)
-    self.grace_period_secs = grace_period * 60
-    self.occupied_sleep = occupied_sleep
-    self.vacant_sleep = vacant_sleep
+    self.grace_period_secs = self.grace_period * 60
+    self.occupied_sleep = int(occupied_sleep)
+    self.vacant_sleep = int(vacant_sleep)
     self.verbose = verbose
     self.reverse = reverse
     self.randomise = randomise
 
     self.debug("Monitoring %d device%s: [%s]" % (len(devices), "s"[len(devices)==1:], ", ".join(devices)))
     self.debug("Using ARP: %s, Reverse Lookup: %s" % (use_arp, reverse))
-    self.debug("Grace Period: %d mins" % (grace_period))
+    self.debug("Pings: %d, Grace Period: %d mins" % (pings, grace_period))
     if self.off_peak_start and self.off_peak_end:
       self.debug("Off Peak: %s -> %s" % (off_peak_start, off_peak_end))
     else:
@@ -101,11 +103,21 @@ class AutoAway(object):
     for device in dlist:
       fqname, ipaddress = self.getHostDetails(device)
       if ipaddress:
-        if sys.platform.startswith("linux"):
-          response = os.system("ping -c 1 -w 1 %s >/dev/null" % ipaddress)
-        else:
-          response = os.system("ping -n 1 -w 1000 %s >nul" % ipaddress)
-        if response == 0:
+        try:
+          if sys.platform.startswith("linux"):
+            response = subprocess.check_output(["ping", "-c","%d" % self.pings, "-W", "1", ipaddress]).decode("utf-8")
+          else:
+            response = subprocess.check_output(["ping", "-n", "%d" % self.pings, "-w", "1000", ipaddress]).decode("utf-8")
+          exitcode = 0
+        except (subprocess.CalledProcessError) as e:
+          response = e.output
+          exitcode = e.returncode
+
+        (sent, received, lost, errors, pctloss) = self.extractPacketStats(response)
+        self.debug("** Ping stats for %s: %d sent, %d received, %d lost (%d%% loss), %d errors" %
+          (fqname, sent, received, lost, pctloss, errors))
+
+        if received != 0:
           self.debug("** Got Ping reply from: %s [%s]" % (fqname, ipaddress))
           gotreply = True
           break
@@ -114,6 +126,37 @@ class AutoAway(object):
       else:
         self.debug("** Invalid Device: %s (no ip address)" % fqname)
     return gotreply
+
+  def extractPacketStats(self, response):
+    re_match = None
+    re_group = None
+    replies = 0
+    for line in response.split("\n"):
+      if not line: continue
+      if re_match:
+        re_group = re.search("^.*?(\d+).*?(\d+).*?(\d+) errors.*?(\d+)%.*$", line)
+        if not re_group:
+          re_group = re.search("^.*?(\d+).*?(\d+).*?(\d+)%.*$", line)
+        break
+      else:
+        if re.match(".*from.* ttl=.*$", line, flags=re.IGNORECASE):
+          replies += 1
+        else:
+          re_match = re.search("^.*?ping statistics.*", line, flags=re.IGNORECASE)
+
+    # Sent/Received/Lost/Errors/% Loss
+    r = [0, 0, 0, 0, 0]
+    if re_group and len(re_group.groups()) != 0:
+      r[0] = int(re_group.group(1)) # Sent
+      r[1] = replies
+      if len(re_group.groups()) == 4: # s/r/e/%
+        r[3] = int(re_group.group(3)) # Errors
+
+      # Calculate lost and % loss
+      r[2] = r[0] - r[1]
+      r[4] = int(100*(1-(float(r[1])/float(r[0]))))
+
+    return(tuple(r))
 
   def arp_check(self):
     self.debug("Checking ARP Cache...")
@@ -417,7 +460,7 @@ def init():
 
   GITHUB = "https://raw.github.com/MilhouseVH/autoaway.py/master/"
   ANALYTICS = "http://goo.gl/ZTe1mN"
-  VERSION = "0.0.1"
+  VERSION = "0.0.2"
 
   parser = argparse.ArgumentParser(description="Manage auto-away status based on presence of mobile devices",
                     formatter_class=lambda prog: argparse.HelpFormatter(prog,max_help_position=25,width=90))
@@ -445,6 +488,9 @@ def init():
                       help="Execute FILENAME when change of occupancy occurs - passed \
                       \"here\" or \"away\" as argument")
 
+  parser.add_argument("-p", "--pings", type=int, choices=range(1, 6), default=1, \
+                      help="Number of ping requests - default: 1. Increase if poor WiFi reception \
+                            leads to false \"away\" detection.")
   parser.add_argument("--noarp", action="store_true", \
                       help="Do not try to find devices in ARP cache")
   parser.add_argument("--noreverse", action="store_true", \
@@ -492,8 +538,8 @@ def init():
 #===================
 
 def main(args):
-  autoaway = AutoAway(args.devices, not args.noarp, args.grace, args.notify,
-                      args.offpeakstart, args.offpeakend,
+  autoaway = AutoAway(args.devices, not args.noarp, args.pings, args.grace,
+                      args.notify, args.offpeakstart, args.offpeakend,
                       args.occupied_sleep, args.vacant_sleep,
                       verbose=args.verbose, reverse=not args.noreverse,
                       randomise=not args.norandom)
