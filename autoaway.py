@@ -214,20 +214,28 @@ class AutoAway(object):
     sleep_time = self.occupied_sleep
 
     if self.DevicesSeen():
-      # When property is occupied during off peak hours, sleep for longer
-      # to avoid unecessary device communication and battery drain
+      # When the property is occupied during off peak hours, sleep for
+      # longer to avoid unecessary device communication and battery drain.
       if self.off_peak_start and self.off_peak_end:
         t = datetime.datetime.now().timetuple()
         hour_min = (t[3], t[4])
+
         s = self.off_peak_start
         e = self.off_peak_end
         if e < s: e = (e[0]+24, e[1])
-        if hour_min[0] < s[0]: hour_min=(hour_min[0]+24, hour_min[1])
+        hour_min24 = (hour_min[0]+24, hour_min[1]) if hour_min[0] < s[0] else hour_min
 
         # If off peak is active, sleep until off peak ends
-        if s <= hour_min < e:
+        if s <= hour_min24 < e:
           offpeak = True
-          sleep_time = ((e[0] - hour_min[0])*60*60) + (e[1] - hour_min[1])*60
+          sleep_time = ((e[0] - hour_min24[0])*60*60) + ((e[1] - hour_min24[1])*60)
+        else:
+          # If off-peak kicks in before the next default occupancy check, only
+          # sleep long enough so that the last on-peak check occurs just as
+          # off-peak begins.
+          if hour_min[0] > s[0]: s = (s[0]+24, s[1])
+          secs_to_offpeak = ((s[0] - hour_min[0])*60*60) + ((s[1] - hour_min[1])*60)
+          if secs_to_offpeak < sleep_time: sleep_time = secs_to_offpeak
     else:
       sleep_time = self.vacant_sleep
 
@@ -421,14 +429,17 @@ def init():
                       help="Grace period after last device seen, in minutes")
 
   parser.add_argument("-ops", "--offpeakstart", metavar="HH:MM", \
-                      help="Off peak period start, eg. 01:00")
+                      help="Off peak period start, eg. 01:00. Use 24-hour notation for HH:MM")
   parser.add_argument("-ope", "--offpeakend", metavar="HH:MM", \
-                      help="Off peak period end, eg. 08:00")
+                      help="Off peak period end, eg. 08:00. Device communication will \
+                            be disabled during the off peak period unless no devices are \
+                            present prior to off peak commencing..Use 24-hour notation for HH:MM. \
+                            Both a start and end time must be specified for off-peak to be enabled.")
 
   parser.add_argument("-os", "--occupied-sleep", metavar="SECONDS", type=int, default=15*60, \
-                      help="Sleep interval while property is oocupied")
+                      help="Sleep interval to be used when property is oocupied")
   parser.add_argument("-vs", "--vacant-sleep", metavar="SECONDS", type=int, default=15, \
-                      help="Sleep interval while property is vacated")
+                      help="Sleep interval to be used when property is vacant")
 
   parser.add_argument("-n", "--notify", metavar="FILENAME", \
                       help="Execute FILENAME when change of occupancy occurs - passed \
@@ -439,15 +450,16 @@ def init():
   parser.add_argument("--noreverse", action="store_true", \
                       help="No reverse lookup on device names")
   parser.add_argument("--norandom", action="store_true", \
-                      help="Do not randomise device pings - ping using left-to-right order")
+                      help="Do not randomise order devices are communicated with - \
+                            use strict left-to-right order devices appear on command line")
 
   group = parser.add_mutually_exclusive_group()
   group.add_argument("--version", action="store_true", \
-                      help="Check current version, and if a new version is available")
+                      help="Display current version and notify if a new version is available")
   group.add_argument("--nocheck", action="store_true", \
-                      help="Do not check if a new version is available")
+                      help="Do not automatically notify new version availability")
 
-  group = parser.add_argument_group('Version upgrades').add_mutually_exclusive_group()
+  group = parser.add_argument_group('Version upgrade').add_mutually_exclusive_group()
   group.add_argument("--update", action="store_true", \
                       help="Update to latest version (if required)")
   group.add_argument("--fupdate", action="store_true", \
