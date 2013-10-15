@@ -114,7 +114,7 @@ class AutoAway(object):
           response = e.output
 
         (sent, received, lost, errors, pctloss) = self.extractPacketStats(response)
-        self.debug("** Ping stats for %s: %d sent, %d received, %d lost (%d%% loss), %d errors" %
+        self.debug("* Ping stats for %s: %d sent, %d received, %d lost (%d%% loss), %d errors" %
           (fqname, sent, received, lost, pctloss, errors))
 
         if received != 0:
@@ -192,6 +192,8 @@ class AutoAway(object):
                 arp[match.group(1)] = match.group(2)
         except (OSError, subprocess.CalledProcessError) as e:
           pass
+
+    self.debug("* ARP Cache has %d entrie(s)" % len(arp))
 
     found = False
     for device in self.devices:
