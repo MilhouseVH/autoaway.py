@@ -104,16 +104,14 @@ class AutoAway(object):
       fqname, ipaddress = self.getHostDetails(device)
       if ipaddress:
         try:
-          if sys.platform.startswith("linux"):
-            response = subprocess.check_output(["ping", "-c","%d" % self.pings, "-W", "1", ipaddress],
-                                               stderr=subprocess.STDOUT).decode("utf-8")
-          else:
+          if sys.platform == "win32":
             response = subprocess.check_output(["ping", "-n", "%d" % self.pings, "-w", "1000", ipaddress],
                                                stderr=subprocess.STDOUT).decode("utf-8")
-          exitcode = 0
+          else:
+            response = subprocess.check_output(["ping", "-c","%d" % self.pings, "-W", "1", ipaddress],
+                                               stderr=subprocess.STDOUT).decode("utf-8")
         except (subprocess.CalledProcessError) as e:
           response = e.output
-          exitcode = e.returncode
 
         (sent, received, lost, errors, pctloss) = self.extractPacketStats(response)
         self.debug("** Ping stats for %s: %d sent, %d received, %d lost (%d%% loss), %d errors" %
@@ -150,7 +148,7 @@ class AutoAway(object):
     r = [0, 0, 0, 0, 0]
     if re_group and len(re_group.groups()) != 0:
       r[0] = int(re_group.group(1)) # Sent
-      r[1] = replies
+      r[1] = replies if sys.platform == "win32" else int(re_group.group(2))
       if len(re_group.groups()) == 4: # s/r/e/%
         r[3] = int(re_group.group(3)) # Errors
 
@@ -165,7 +163,17 @@ class AutoAway(object):
 
     arp = {}
 
-    if sys.platform.startswith("linux"):
+    if sys.platform == "win32":
+      try:
+        response = subprocess.check_output(["arp", "-a"],
+                                           stderr=subprocess.STDOUT).decode("utf-8")
+        for line in response.split("\r\n"):
+          if line:
+            match = re.match(" *([0-9]*\.[0-9]*\.[0-9]*\.[0-9]*) *([^ ]*) *([^ ]*)", line)
+            if match and match.group(3) != "invalid": arp[match.group(1)] = match.group(3)
+      except (OSError, subprocess.CalledProcessError) as e:
+        pass
+    else:
       try:
         response = subprocess.check_output(["arp", "-a"],
                                            stderr=subprocess.STDOUT).decode("utf-8")
@@ -182,18 +190,8 @@ class AutoAway(object):
               match = re.match("^([0-9]*\.[0-9]*\.[0-9]*\.[0-9]*).* (.*)$", line)
               if match and match.group(2) != "FAILED":
                 arp[match.group(1)] = match.group(2)
-        except (subprocess.CalledProcessError) as e:
+        except (OSError, subprocess.CalledProcessError) as e:
           pass
-    else:
-      try:
-        response = subprocess.check_output(["arp", "-a"],
-                                           stderr=subprocess.STDOUT).decode("utf-8")
-        for line in response.split("\r\n"):
-          if line:
-            match = re.match(" *([0-9]*\.[0-9]*\.[0-9]*\.[0-9]*) *([^ ]*) *([^ ]*)", line)
-            if match and match.group(3) != "invalid": arp[match.group(1)] = match.group(3)
-      except (subprocess.CalledProcessError) as e:
-        pass
 
     found = False
     for device in self.devices:
