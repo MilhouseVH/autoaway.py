@@ -105,9 +105,11 @@ class AutoAway(object):
       if ipaddress:
         try:
           if sys.platform.startswith("linux"):
-            response = subprocess.check_output(["ping", "-c","%d" % self.pings, "-W", "1", ipaddress]).decode("utf-8")
+            response = subprocess.check_output(["ping", "-c","%d" % self.pings, "-W", "1", ipaddress],
+                                               stderr=subprocess.STDOUT).decode("utf-8")
           else:
-            response = subprocess.check_output(["ping", "-n", "%d" % self.pings, "-w", "1000", ipaddress]).decode("utf-8")
+            response = subprocess.check_output(["ping", "-n", "%d" % self.pings, "-w", "1000", ipaddress],
+                                               stderr=subprocess.STDOUT).decode("utf-8")
           exitcode = 0
         except (subprocess.CalledProcessError) as e:
           response = e.output
@@ -164,30 +166,46 @@ class AutoAway(object):
     arp = {}
 
     if sys.platform.startswith("linux"):
-      response = subprocess.check_output(["ip", "-s", "neighbor", "list"]).decode("utf-8")
-      for line in response.split("\n"):
-        if line:
-          fields = line.split(" ")
-          if fields[len(fields)-1] != "FAILED":
-            arp[fields[0]] = fields[len(fields)-1]
+      try:
+        response = subprocess.check_output(["arp", "-a"],
+                                           stderr=subprocess.STDOUT).decode("utf-8")
+        for line in response.split("\n"):
+          if line:
+            match = re.match(".* \(([0-9]*\.[0-9]*\.[0-9]*\.[0-9]*)\).*", line)
+            if match: arp[match.group(1)] = "OK"
+      except (OSError, subprocess.CalledProcessError) as e:
+        try:
+          response = subprocess.check_output(["ip", "neighbor", "list"],
+                                             stderr=subprocess.STDOUT).decode("utf-8")
+          for line in response.split("\n"):
+            if line:
+              match = re.match("^([0-9]*\.[0-9]*\.[0-9]*\.[0-9]*).* (.*)$", line)
+              if match and match.group(2) != "FAILED":
+                arp[match.group(1)] = match.group(2)
+        except (subprocess.CalledProcessError) as e:
+          pass
     else:
-      response = subprocess.check_output(["arp", "-a"]).decode("utf-8")
-      for line in response.split("\r\n"):
-        if line:
-          fields = [x for x in line.split(" ") if x != ""]
-          if fields[len(fields)-1] != "invalid":
-            arp[fields[0]] = fields[len(fields)-1]
+      try:
+        response = subprocess.check_output(["arp", "-a"],
+                                           stderr=subprocess.STDOUT).decode("utf-8")
+        for line in response.split("\r\n"):
+          if line:
+            match = re.match(" *([0-9]*\.[0-9]*\.[0-9]*\.[0-9]*) *([^ ]*) *([^ ]*)", line)
+            if match and match.group(3) != "invalid": arp[match.group(1)] = match.group(3)
+      except (subprocess.CalledProcessError) as e:
+        pass
 
-    present = False
+    found = False
     for device in self.devices:
       fqname, ipaddress = self.getHostDetails(device)
       if ipaddress in arp:
         self.debug("** Found in ARP Cache: %s [%s]" % (fqname, ipaddress))
-        present = True
+        found = True
         break
       else:
         self.debug("** Not in ARP Cache: %s [%s]" % (fqname, ipaddress))
-    return present
+
+    return found
 
   def getHostDetails(self, device):
     try:
@@ -241,7 +259,8 @@ class AutoAway(object):
       value = "here" if isOccupied else "away"
       self.debug("Calling notify [%s] with value [%s]" % (self.notify, value))
       try:
-        response = subprocess.check_output([self.notify, value], stderr=subprocess.STDOUT).decode("utf-8")
+        response = subprocess.check_output([self.notify, value],
+                                           stderr=subprocess.STDOUT).decode("utf-8")
         if response:
           self.debug("** Start of response **")
           self.debug("%s" % response[:-(len(os.linesep))])
