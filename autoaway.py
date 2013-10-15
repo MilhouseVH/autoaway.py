@@ -462,18 +462,6 @@ def getLatestVersion_ex(url, headers=None, checkerror=True):
 
 #===================
 
-def log(msg):
-  print("%s: %s" % (datetime.datetime.now(), msg))
-  sys.stdout.flush()
-
-def PresenceChanged(isOccupied, autoaway):
-  if isOccupied:
-    log("Property is occupied - vacant for %s" % autoaway.GetVacantPeriod())
-  else:
-    log("Property is vacant - occupied for %s" % autoaway.GetOccupiedPeriod())
-
-  autoaway.ExecuteNotification(isOccupied)
-
 def init():
   global GITHUB, ANALYTICS, VERSION
 
@@ -554,6 +542,18 @@ def init():
 
   return args
 
+def log(msg):
+  print("%s: %s" % (datetime.datetime.now(), msg))
+  sys.stdout.flush()
+
+def PresenceChanged(autoaway, isOccupied):
+  if isOccupied:
+    log("Property is occupied - vacant for %s" % autoaway.GetVacantPeriod())
+  else:
+    log("Property is vacant - occupied for %s" % autoaway.GetOccupiedPeriod())
+
+  autoaway.ExecuteNotification(isOccupied)
+
 #===================
 
 def main(args):
@@ -563,25 +563,28 @@ def main(args):
                       verbose=args.verbose, reverse=not args.noreverse,
                       randomise=not args.norandom)
 
-  occupied_prev = autoaway.PropertyIsOccupied()
-  devices_seen = autoaway.DevicesSeen()
+  prev_occupied = autoaway.PropertyIsOccupied()
+  prev_seen= autoaway.DevicesSeen()
 
-  log("Startup status: %s" % ("Occupied" if occupied_prev else "Vacant"))
+  log("Startup status: %s" % ("Occupied" if prev_occupied else "Vacant"))
 
   while True:
     autoaway.Wait()
 
-    occupied_now = autoaway.PropertyIsOccupied()
+    now_occupied = autoaway.PropertyIsOccupied()
+    now_seen = autoaway.DevicesSeen()
 
-    if devices_seen and not autoaway.DevicesSeen():
-      log("Property appears to have been vacated - %d minute grace period commencing..." % args.grace)
-    elif not devices_seen and autoaway.DevicesSeen():
-      log("Property now re-occupied")
-    devices_seen = autoaway.DevicesSeen()
+    if now_occupied:
+      if prev_seen and not now_seen:
+        log("No devices found, property vacated? %d minute grace period commencing..." % args.grace)
+      elif not prev_seen and now_seen:
+        log("Device(s) found - property re-occupied within grace period")
 
-    if occupied_now != occupied_prev:
-      PresenceChanged(occupied_now, autoaway)
-      occupied_prev = occupied_now
+    if now_occupied != prev_occupied:
+      PresenceChanged(autoaway, now_occupied)
+
+    prev_occupied = now_occupied
+    prev_seen = now_seen
 
 try:
   main(init())
