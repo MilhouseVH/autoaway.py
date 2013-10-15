@@ -576,9 +576,9 @@ def main(args):
 
     if now_occupied:
       if prev_seen and not now_seen:
-        log("No devices found, property vacated? %d minute grace period commencing..." % args.grace)
+        log("No device(s) present, property vacated? %d minute grace period commencing..." % args.grace)
       elif not prev_seen and now_seen:
-        log("Device(s) found - property re-occupied within grace period")
+        log("Device(s) now present - property re-occupied during grace period")
 
     if now_occupied != prev_occupied:
       PresenceChanged(autoaway, now_occupied)
