@@ -1,5 +1,8 @@
 #Changelog
 
+##Version 0.0.3 (16/10/2013)
+* Add --check-every option to use a more regular check interval (eg. --check-every 15 would check at precise 00, 15, 30 and 45 minute intervals).
+
 ##Version 0.0.2 (14/10/2013)
 * Add --pings option to increase number of ping requests, useful if WiFi reception is patchy
 * Parse ping results for improved reliability on Windows (which tends to lie about availability of unreachable hosts)
