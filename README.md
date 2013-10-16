@@ -24,9 +24,9 @@ Increase the likelihood of devices being in the ARP cache by running DHCP/DNS (e
 ####Usage:
 ```
 usage: autoaway.py [-h] [-d DEVICE [DEVICE ...]] [-g MINUTES] [-ops HH:MM] [-ope HH:MM]
-                   [-os SECONDS] [-vs SECONDS] [-n FILENAME] [-p {1,2,3,4,5}] [--noarp]
-                   [--noreverse] [--norandom] [--version | --nocheck]
-                   [--update | --fupdate] [-v]
+                   [-ce MIUNUTES | -os SECONDS] [-vs SECONDS] [-n FILENAME]
+                   [-p {1,2,3,4,5}] [--noarp] [--noreverse] [--norandom]
+                   [--version | --nocheck] [--update | --fupdate] [-v]
 
 Manage auto-away status based on presence of mobile devices
 
@@ -44,10 +44,15 @@ optional arguments:
                          prior to off peak commencing..Use 24-hour notation for HH:MM.
                          Both a start and end time must be specified for off-peak to be
                          enabled.
+  -ce MIUNUTES, --check-every MIUNUTES
+                         Schedule device checks at regular MINUTES intervals, eg. 5, or
+                         10. Range 1..60. Default is 15.
   -os SECONDS, --occupied-sleep SECONDS
-                         Sleep interval to be used when property is oocupied
+                         Alternative sleep interval used when property is oocupied.
+                         Specified in seconds. Less regular than --check-every.
   -vs SECONDS, --vacant-sleep SECONDS
-                         Sleep interval to be used when property is vacant
+                         Sleep interval to be used when property is vacant. Default is 15
+                         seconds.
   -n FILENAME, --notify FILENAME
                          Execute FILENAME when change of occupancy occurs - passed "here"
                          or "away" as argument

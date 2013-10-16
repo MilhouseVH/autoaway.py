@@ -45,7 +45,7 @@ else:
 class AutoAway(object):
   def __init__( self, devices, use_arp=True, pings=1, grace_period=30, notify=None,
                     off_peak_start=None, off_peak_end=None,
-                    occupied_sleep=15*60, vacant_sleep=15,
+                    occupied_sleep=15*60, check_every=None, vacant_sleep=15,
                     verbose=False, reverse=True, randomise=True):
 
     self.devices = devices
@@ -56,21 +56,25 @@ class AutoAway(object):
     self.off_peak_start = self.time_to_tuple(off_peak_start)
     self.off_peak_end = self.time_to_tuple(off_peak_end)
     self.grace_period_secs = self.grace_period * 60
-    self.occupied_sleep = int(occupied_sleep)
+    self.occupied_sleep = int(occupied_sleep) if occupied_sleep else occupied_sleep
+    self.check_every = int(check_every) if check_every else check_every
     self.vacant_sleep = int(vacant_sleep)
     self.verbose = verbose
     self.reverse = reverse
     self.randomise = randomise
 
-    self.debug("Monitoring %d device%s: [%s]" % (len(devices), "s"[len(devices)==1:], ", ".join(devices)))
-    self.debug("Using ARP: %s, Reverse Lookup: %s" % (use_arp, reverse))
-    self.debug("Pings: %d, Grace Period: %d mins" % (pings, grace_period))
+    self.debug("Monitoring %d device%s: [%s]" % (len(self.devices), "s"[len(self.devices)==1:], ", ".join(self.devices)))
+    self.debug("Using ARP: %s, Reverse Lookup: %s" % (self.use_arp, self.reverse))
+    self.debug("Pings: %d, Grace Period: %d mins" % (self.pings, self.grace_period))
     if self.off_peak_start and self.off_peak_end:
       self.debug("Off Peak: %s -> %s" % (off_peak_start, off_peak_end))
     else:
       self.debug("Off Peak: Not set")
-    self.debug("Sleep interval when occupied: %d secs" % occupied_sleep)
-    self.debug("Sleep Interval when vacant:   %d secs" % vacant_sleep)
+    if self.check_every:
+      self.debug("Sleep interval when occupied: Every %d minutes" % self.check_every)
+    else:
+      self.debug("Sleep interval when occupied: %d secs" % self.occupied_sleep)
+    self.debug("Sleep Interval when vacant:   %d secs" % self.vacant_sleep)
     self.debug("=" * 50)
 
     self.last_seen = 0
@@ -273,30 +277,30 @@ class AutoAway(object):
 
   def Wait(self):
     offpeak = False
-    sleep_time = self.occupied_sleep
 
     if self.DevicesSeen():
+      sleep_time = self.get_next_interval()
+
       # When the property is occupied during off peak hours, sleep for
       # longer to avoid unecessary device communication and battery drain.
       if self.off_peak_start and self.off_peak_end:
         t = datetime.datetime.now().timetuple()
-        hour_min = (t[3], t[4])
-
+        hms = (t[3], t[4], t[5])
         s = self.off_peak_start
         e = self.off_peak_end
-        if e < s: e = (e[0]+24, e[1])
-        hour_min24 = (hour_min[0]+24, hour_min[1]) if hour_min[0] < s[0] else hour_min
+        if e < s: e = (e[0]+24, e[1], e[2])
+        hms24 = (hms[0]+24, hms[1], hms[2]) if hms[0] < s[0] else hms
 
         # If off peak is active, sleep until off peak ends
-        if s <= hour_min24 < e:
+        if s <= hms24 < e:
           offpeak = True
-          sleep_time = ((e[0] - hour_min24[0])*60*60) + ((e[1] - hour_min24[1])*60)
+          sleep_time = ((e[0] - hms24[0])*60*60) + ((e[1] - hms24[1])*60) + (e[2] - hms24[2])
         else:
           # If off-peak kicks in before the next default occupancy check, only
           # sleep long enough so that the last on-peak check occurs just as
           # off-peak begins.
-          if hour_min[0] > s[0]: s = (s[0]+24, s[1])
-          secs_to_offpeak = ((s[0] - hour_min[0])*60*60) + ((s[1] - hour_min[1])*60)
+          if hms[0] > s[0]: s = (s[0]+24, s[1], s[2])
+          secs_to_offpeak = ((s[0] - hms[0])*60*60) + ((s[1] - hms[1])*60) + (s[2] - hms[2])
           if secs_to_offpeak < sleep_time: sleep_time = secs_to_offpeak
     else:
       sleep_time = self.vacant_sleep
@@ -307,6 +311,20 @@ class AutoAway(object):
         " [Off peak is active]" if offpeak else ""))
 
     time.sleep(sleep_time)
+
+  # Return an interval that schedules the next sleep period
+  # for either the default number of seconds (occupied_sleep)
+  # or calculates when the next check_every should occur (eg.
+  # every 5 minutes)
+  def get_next_interval(self):
+    if self.check_every:
+      t = datetime.datetime.now().timetuple()
+      hms = (t[3], t[4], t[5])
+      next = (hms[0], hms[1] + self.check_every - (hms[1] % self.check_every), 0)
+      if next[1] >= 60: next = (next[0]+1, next[1] - 60, next[2])
+      return ((next[0] - hms[0])*60*60) + ((next[1] - hms[1])*60) + (next[2] - hms[2])
+    else:
+      return self.occupied_sleep
 
   def secsToTime(self, secs, format=None):
     (days, hours, mins, seconds) = (int(secs/86400), int(secs/3600) % 24, int(secs/60) % 60, secs % 60)
@@ -324,7 +342,7 @@ class AutoAway(object):
       return None
     else:
       hour, min = aTime.split(":")
-      return (int(hour), int(min))
+      return (int(hour), int(min), 0)
 
   def debug(self, msg):
     if self.verbose:
@@ -467,7 +485,7 @@ def init():
 
   GITHUB = "https://raw.github.com/MilhouseVH/autoaway.py/master/"
   ANALYTICS = "http://goo.gl/ZTe1mN"
-  VERSION = "0.0.2"
+  VERSION = "0.0.3"
 
   parser = argparse.ArgumentParser(description="Manage auto-away status based on presence of mobile devices",
                     formatter_class=lambda prog: argparse.HelpFormatter(prog,max_help_position=25,width=90))
@@ -486,10 +504,14 @@ def init():
                             present prior to off peak commencing..Use 24-hour notation for HH:MM. \
                             Both a start and end time must be specified for off-peak to be enabled.")
 
-  parser.add_argument("-os", "--occupied-sleep", metavar="SECONDS", type=int, default=15*60, \
-                      help="Sleep interval to be used when property is oocupied")
+  group = parser.add_mutually_exclusive_group()
+  group.add_argument("-ce", "--check-every", metavar="MIUNUTES", type=int, choices=range(1,61), \
+                      help="Schedule device checks at regular MINUTES intervals, eg. 5, or 10. Range 1..60. Default is 15.")
+  group.add_argument("-os", "--occupied-sleep", metavar="SECONDS", type=int, \
+                      help="Alternative sleep interval used when property is oocupied. Specified in seconds. \
+                            Less regular than --check-every.")
   parser.add_argument("-vs", "--vacant-sleep", metavar="SECONDS", type=int, default=15, \
-                      help="Sleep interval to be used when property is vacant")
+                      help="Sleep interval to be used when property is vacant. Default is 15 seconds.")
 
   parser.add_argument("-n", "--notify", metavar="FILENAME", \
                       help="Execute FILENAME when change of occupancy occurs - passed \
@@ -522,6 +544,8 @@ def init():
                       help="Display diagnostic output")
 
   args = parser.parse_args()
+
+  if not (args.check_every or args.occupied_sleep): args.check_every = 15
 
   if args.version or args.update or args.fupdate:
     if args.version:
@@ -559,7 +583,7 @@ def PresenceChanged(autoaway, isOccupied):
 def main(args):
   autoaway = AutoAway(args.devices, not args.noarp, args.pings, args.grace,
                       args.notify, args.offpeakstart, args.offpeakend,
-                      args.occupied_sleep, args.vacant_sleep,
+                      args.occupied_sleep, args.check_every, args.vacant_sleep,
                       verbose=args.verbose, reverse=not args.noreverse,
                       randomise=not args.norandom)
 
