@@ -100,7 +100,6 @@ class AutoAway(object):
 
   def ping_check(self):
     self.debug("Pinging remote hosts...")
-    gotreply = False
 
     dlist = random.sample(self.devices, len(self.devices)) if self.randomise else self.devices
 
@@ -123,13 +122,13 @@ class AutoAway(object):
 
         if received != 0:
           self.debug("** Got Ping reply from: %s [%s]" % (fqname, ipaddress))
-          gotreply = True
-          break
+          return True
         else:
           self.debug("** No Ping reply from: %s [%s]" % (fqname, ipaddress))
       else:
         self.debug("** Invalid Device: %s (no ip address)" % fqname)
-    return gotreply
+    else:
+      return False
 
   def extractPacketStats(self, response):
     re_match = None
@@ -174,7 +173,8 @@ class AutoAway(object):
         for line in response.split("\r\n"):
           if line:
             match = re.match(" *([0-9]*\.[0-9]*\.[0-9]*\.[0-9]*) *([^ ]*) *([^ ]*)", line)
-            if match and match.group(3) != "invalid": arp[match.group(1)] = match.group(3)
+            if match and match.group(3) != "invalid":
+              arp[match.group(1)] = match.group(3)
       except (OSError, subprocess.CalledProcessError) as e:
         pass
     else:
@@ -184,7 +184,8 @@ class AutoAway(object):
         for line in response.split("\n"):
           if line:
             match = re.match(".* \(([0-9]*\.[0-9]*\.[0-9]*\.[0-9]*)\).*", line)
-            if match: arp[match.group(1)] = "OK"
+            if match:
+              arp[match.group(1)] = "OK"
       except (OSError, subprocess.CalledProcessError) as e:
         try:
           response = subprocess.check_output(["ip", "neighbor", "list"],
@@ -199,17 +200,15 @@ class AutoAway(object):
 
     self.debug("* ARP Cache has %d entrie(s)" % len(arp))
 
-    found = False
     for device in self.devices:
       fqname, ipaddress = self.getHostDetails(device)
       if ipaddress in arp:
         self.debug("** Found in ARP Cache: %s [%s]" % (fqname, ipaddress))
-        found = True
-        break
+        return True
       else:
         self.debug("** Not in ARP Cache: %s [%s]" % (fqname, ipaddress))
-
-    return found
+    else:
+      return False
 
   def getHostDetails(self, device):
     try:
@@ -379,11 +378,11 @@ def downloadLatestVersion(args):
 
   if not remoteVersion:
     print("FATAL: Unable to determine version of the latest file, check internet and github.com are available.")
-    sys.exit(2)
+    return
 
   if not args.fupdate and remoteVersion <= VERSION:
     print("Current version is already up to date - no update required.")
-    sys.exit(2)
+    return
 
   try:
     response = urllib2.urlopen("%s/%s" % (GITHUB, "autoaway.py"))
@@ -391,21 +390,21 @@ def downloadLatestVersion(args):
   except Exception as e:
     print("Exception in downloadLatestVersion(): %s" % e)
     print("FATAL: Unable to download latest version, check internet and github.com are available.")
-    sys.exit(2)
+    return
 
   digest = hashlib.md5()
   digest.update(data)
 
   if (digest.hexdigest() != remoteHash):
     print("FATAL: Checksum of new version is incorrect, possibly corrupt download - abandoning update.")
-    sys.exit(2)
+    return
 
   path = os.path.realpath(__file__)
   dir = os.path.dirname(path)
 
   if os.path.exists("%s%s.git" % (dir, os.sep)):
     print("FATAL: Might be updating version in git repository... Abandoning update!")
-    sys.exit(2)
+    return
 
   try:
     THISFILE = open(path, "wb")
@@ -413,7 +412,7 @@ def downloadLatestVersion(args):
     THISFILE.close()
   except:
     print("FATAL: Unable to update current file, check you have write access")
-    sys.exit(2)
+    return
 
   print("Successfully updated from v%s to v%s" % (VERSION, remoteVersion))
 
@@ -550,17 +549,15 @@ def init():
   if args.version or args.update or args.fupdate:
     if args.version:
       checkVersion(args)
-    elif args.update or args.fupdate:
+    else:
       downloadLatestVersion(args)
     sys.exit(1)
 
   if args.notify and not os.path.exists(args.notify):
     parser.error("--notify file %s does not exist!" % args.notify)
-    sys.exit(1)
 
   if args.devices == None:
     parser.error("argument -d/--devices is required")
-    sys.exit(1)
 
   if not args.nocheck: checkVersion(args)
 
