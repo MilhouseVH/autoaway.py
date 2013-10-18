@@ -36,21 +36,26 @@ import argparse
 import random
 import hashlib
 import re
+import threading
 
 if sys.version_info >= (3, 0):
   import urllib.request as urllib2
+  import queue as Queue
 else:
   import urllib2
+  import Queue
 
 class AutoAway(object):
-  def __init__( self, devices, use_arp=True, pings=1, grace_period=30, notify=None,
-                    off_peak_start=None, off_peak_end=None,
-                    occupied_sleep=15*60, check_every=None, vacant_sleep=15,
-                    verbose=False, reverse=True, randomise=True):
+  def __init__( self, devices, use_arp=True, pings=1, subnet=None,
+                      grace_period=30, notify=None,
+                      off_peak_start=None, off_peak_end=None,
+                      occupied_sleep=15*60, check_every=None, vacant_sleep=15,
+                      verbose=False, reverse=True, randomise=True):
 
     self.devices = devices
     self.use_arp = use_arp
     self.pings = int(pings)
+    self.subnet = subnet
     self.grace_period = int(grace_period)
     self.notify = notify
     self.off_peak_start = self.time_to_tuple(off_peak_start)
@@ -78,7 +83,16 @@ class AutoAway(object):
     else:
       self.debug("Sleep interval when occupied: %d secs" % self.occupied_sleep)
     self.debug("Sleep Interval when vacant:   %d secs" % self.vacant_sleep)
-    self.debug("=" * 50)
+
+    self.arp_type = "arp"
+    if sys.platform != "win32":
+      try:
+        response = subprocess.check_output(["ip", "neighbor", "list"],
+                                           stderr=subprocess.STDOUT).decode("utf-8")
+        self.arp_type = "ip"
+      except (OSError, subprocess.CalledProcessError) as e:
+        pass
+    self.debug("ARP Cache type: %s" % self.arp_type)
 
     self.last_seen = 0
     self.first_seen = 0
@@ -86,6 +100,19 @@ class AutoAway(object):
 
     self.time_occupied = 0
     self.time_vacant = 0
+
+    if self.dynamic_list:
+      arp = self.get_arp_cache()
+      self.learn_mac_hosts(arp)
+      if not [x for x in self.dynamic_list if x[1] != ""]:
+        if not self.subnet:
+          self.subnet = self.get_subnet_from_arp(arp)
+        self.debug("* Local sub-domain appears to be: %s" % self.subnet)
+        if self.subnet:
+          self.debug("* Performing ping flood in order to resolve MAC address(es)")
+          self.ping_subnet(self.subnet)
+
+    self.debug("=" * 50)
 
   def PropertyIsOccupied(self):
     is_occupied = self.get_status()
@@ -243,6 +270,33 @@ class AutoAway(object):
     else:
       return False
 
+  def ping_subnet(self, subnet, maxthreads=20):
+    self.debug("Pinging subnet %s.x..." % subnet)
+
+    work_queue = Queue.Queue()
+
+    for host in range(1, 255):
+      ipaddress = "%s.%d" % (subnet, host)
+      work_queue.put(ipaddress)
+    MAX_SIZE = work_queue.qsize()
+
+    THREADS = []
+    for i in range(0, maxthreads):
+      t= MyPingThread(work_queue)
+      t.setDaemon(True)
+      THREADS.append(t)
+
+    # Start the threads...
+    for t in THREADS: t.start()
+
+    try:
+      while not work_queue.empty():
+        time.sleep(4.0)
+        self.debug("Ping flood progress: %s.%d" % (subnet, MAX_SIZE - work_queue.qsize()))
+    except (KeyboardInterrupt, SystemExit):
+      stopped.set()
+      sys.exit(2)
+
   def get_ping_stats(self, response):
     re_match = None
     re_group = None
@@ -292,16 +346,19 @@ class AutoAway(object):
       except (OSError, subprocess.CalledProcessError) as e:
         pass
     else:
-      try:
-        response = subprocess.check_output(["arp", "-a"],
-                                           stderr=subprocess.STDOUT).decode("utf-8")
-        pattern = re.compile(".* \(([0-9]*\.[0-9]*\.[0-9]*\.[0-9]*)\) at (.*) on (.*)")
-        for line in response.split("\n"):
-          if line:
-            match = re.match(pattern, line)
-            if match and self.isMAC(match.group(2)): # Got a MAC address...
-              arp.append({"mac": match.group(2).split(" ")[0], "ip": match.group(1), "type": match.group(3)})
-      except (OSError, subprocess.CalledProcessError) as e:
+      if self.arp_type == "arp":
+        try:
+          response = subprocess.check_output(["arp", "-a"],
+                                             stderr=subprocess.STDOUT).decode("utf-8")
+          pattern = re.compile(".* \(([0-9]*\.[0-9]*\.[0-9]*\.[0-9]*)\) at (.*) on (.*)")
+          for line in response.split("\n"):
+            if line:
+              match = re.match(pattern, line)
+              if match and self.isMAC(match.group(2)): # Got a MAC address...
+                arp.append({"mac": match.group(2).split(" ")[0], "ip": match.group(1), "type": match.group(3)})
+        except (subprocess.CalledProcessError) as e:
+          pass
+      elif self.arp_type == "ip":
         try:
           response = subprocess.check_output(["ip", "neighbor", "list"],
                                              stderr=subprocess.STDOUT).decode("utf-8")
@@ -311,7 +368,7 @@ class AutoAway(object):
               match = re.match(pattern, line)
               if match and self.isMAC(match.group(2)): # Got a MAC address...
                 arp.append({"mac": match.group(2), "ip": match.group(1), "type": match.group(3)})
-        except (OSError, subprocess.CalledProcessError) as e:
+        except (subprocess.CalledProcessError) as e:
           pass
 
     self.debug("* ARP Cache has %d entrie(s)" % len(arp))
@@ -345,13 +402,26 @@ class AutoAway(object):
         if mac == nic["mac"]:
           if ip != nic["ip"]:
             self.dynamic_list[index] = (mac, nic["ip"])
-            self.debug("* New IP address learned: %s -> %s" % (mac, nic["ip"]))
+            fqname, ipaddress = self.get_host_details(nic["ip"])
+            self.debug("* New IP address learned: %s -> %s (%s)" % (mac, nic["ip"], fqname))
           break
         # Forget any learned IP addresses if now assigned to a different MAC
         elif mac != nic["mac"] and ip == nic["ip"]:
             self.dynamic_list[index] = (mac, "")
             self.debug("* Old IP address unlearned: %s (%s re-allocated to %s)" % (mac, nic["ip"], nic["mac"]))
             break
+
+  def get_subnet_from_arp(self, arp):
+    subnets = {}
+
+    for host in [x for x in arp if x["ip"][:x["ip"].find(".")] in ["192", "10"]]:
+      subnet = host["ip"][:host["ip"].rfind(".")]
+      subnets[subnet] = subnets.get(subnet, 0) + 1
+
+    for subnet in sorted(subnets, key=subnets.get, reverse=True):
+      return subnet
+    else:
+      return None
 
   def isMAC(self, possible_mac):
     return possible_mac.count(":") == 5
@@ -407,6 +477,28 @@ class AutoAway(object):
   def log(self, msg):
     print("%s: %s" % (datetime.datetime.now(), msg))
     sys.stdout.flush()
+
+# Simple ping thread so that an entire subnet can be sent ICMP requests
+# in a relatively short time using multiple threads, in order to populate
+# the ARP cache for MAC->IP resolution
+class MyPingThread(threading.Thread):
+  def __init__(self, work_queue):
+    threading.Thread.__init__(self)
+    self.work_queue = work_queue
+
+  def run(self):
+    while not stopped.is_set() and not self.work_queue.empty():
+      ipaddress = self.work_queue.get()
+      try:
+        if sys.platform == "win32":
+          response = subprocess.check_output(["ping", "-n", "2", "-w", "1000", ipaddress],
+                                             stderr=subprocess.STDOUT).decode("utf-8")
+        else:
+          response = subprocess.check_output(["ping", "-c","2", "-W", "1", ipaddress],
+                                             stderr=subprocess.STDOUT).decode("utf-8")
+      except (subprocess.CalledProcessError) as e:
+        pass
+      self.work_queue.task_done()
 
 #===================
 
@@ -541,7 +633,7 @@ def init():
 
   GITHUB = "https://raw.github.com/MilhouseVH/autoaway.py/master/"
   ANALYTICS = "http://goo.gl/ZTe1mN"
-  VERSION = "0.0.4"
+  VERSION = "0.0.5"
 
   parser = argparse.ArgumentParser(description="Manage auto-away status based on presence of mobile devices",
                     formatter_class=lambda prog: argparse.HelpFormatter(prog,max_help_position=25,width=90))
@@ -572,6 +664,10 @@ def init():
   parser.add_argument("-n", "--notify", metavar="FILENAME", \
                       help="Execute FILENAME when change of occupancy occurs - passed \
                       \"here\" or \"away\" as argument")
+
+  parser.add_argument("-s", "--subnet", metavar="SUBNET", \
+                      help="If only MAC addresses are specified, ping flood the subnet to resolve IP addresses. \
+                            Default is to extract subnet from ARP cache, but this option will override (eg. 192.168.1)")
 
   parser.add_argument("-p", "--pings", type=int, choices=range(1, 6), default=1, \
                       help="Number of ping requests - default: 1. Increase if poor WiFi reception \
@@ -636,7 +732,7 @@ def OccupancyChange(autoaway, isOccupied):
 #===================
 
 def main(args):
-  autoaway = AutoAway(args.devices, not args.noarp, args.pings, args.grace,
+  autoaway = AutoAway(args.devices, not args.noarp, args.pings, args.subnet, args.grace,
                       args.notify, args.offpeakstart, args.offpeakend,
                       args.occupied_sleep, args.check_every, args.vacant_sleep,
                       verbose=args.verbose, reverse=not args.noreverse,
@@ -665,24 +761,8 @@ def main(args):
     prev_occupied = now_occupied
     prev_seen = now_seen
 
-def xx():
-  lines = ["n950.local (192.168.0.47) at <incomplete> on eth0",
-           "raspberrypi.local (192.168.0.4) at b8:27:eb:13:ed:b6 [ether] on eth0"]
-
-
-  lines = ["192.168.0.47 dev eth0  FAILED",
-           "192.168.0.4 dev eth0 lladdr b8:27:eb:13:ed:b6 REACHABLE"]
-
-#  pattern = re.compile("^([0-9]*\.[0-9]*\.[0-9]*\.[0-9]*).* (.*)$")
-  pattern = re.compile("^([0-9]*\.[0-9]*\.[0-9]*\.[0-9]*) .* .* (.*) (.*)$")
-
-  for line in lines:
-    match = re.match(pattern, line)
-    if match: print(match.groups())
-  sys.exit(2)
-
 try:
-#  xx()
+  stopped = threading.Event()
   main(init())
 except (KeyboardInterrupt, SystemExit) as e:
   if type(e) == SystemExit: sys.exit(int(str(e)))

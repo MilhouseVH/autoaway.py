@@ -1,5 +1,9 @@
 #Changelog
 
+##Version 0.0.5 (18/10/2013)
+* Ping flood the subnet at startup to resolve unknown MAC addresses.
+* Add `--subnet` option to specify subnet if it is incorrectly guessed from ARP cache (eg. `--subnet 192.168.0`)
+
 ##Version 0.0.4 (18/10/2013)
 * Add support for MAC addresses, automatically learning IP from ARP cache
 * Although `--noarp` will disable ARP checking, the ARP cache will still be retrieved if MAC addresses are being monitored

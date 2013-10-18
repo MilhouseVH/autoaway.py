@@ -26,7 +26,7 @@ If other methods of device detection can be suggested I'll happily consider addi
 ####Usage:
 ```
 usage: autoaway.py [-h] [-d DEVICE [DEVICE ...]] [-g MINUTES] [-ops HH:MM] [-ope HH:MM]
-                   [-ce MIUNUTES | -os SECONDS] [-vs SECONDS] [-n FILENAME]
+                   [-ce MIUNUTES | -os SECONDS] [-vs SECONDS] [-n FILENAME] [-s SUBNET]
                    [-p {1,2,3,4,5}] [--noarp] [--noreverse] [--norandom]
                    [--nocheck | --version] [--update | --fupdate] [-v]
 
@@ -59,6 +59,10 @@ optional arguments:
   -n FILENAME, --notify FILENAME
                          Execute FILENAME when change of occupancy occurs - passed "here"
                          or "away" as argument
+  -s SUBNET, --subnet SUBNET
+                         If only MAC addresses are specified, ping flood the subnet to
+                         resolve IP addresses. Default is to extract subnet from ARP
+                         cache, but this option will override (eg. 192.168.1)
   -p {1,2,3,4,5}, --pings {1,2,3,4,5}
                          Number of ping requests - default: 1. Increase if poor WiFi
                          reception leads to false postive "away" detection.
