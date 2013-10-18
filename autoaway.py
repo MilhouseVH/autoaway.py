@@ -63,6 +63,9 @@ class AutoAway(object):
     self.reverse = reverse
     self.randomise = randomise
 
+    self.static_list = [("", x) for x in self.devices if not self.isMAC(x)]
+    self.dynamic_list = [(x, "") for x in self.devices if self.isMAC(x)]
+
     self.debug("Monitoring %d device%s: [%s]" % (len(self.devices), "s"[len(self.devices)==1:], ", ".join(self.devices)))
     self.debug("Using ARP: %s, Reverse Lookup: %s" % (self.use_arp, self.reverse))
     self.debug("Pings: %d, Grace Period: %d mins" % (self.pings, self.grace_period))
@@ -84,162 +87,21 @@ class AutoAway(object):
     self.time_occupied = 0
     self.time_vacant = 0
 
-  def CheckForOccupancy(self):
-    inARP = self.arp_check() if self.use_arp else False
-    if inARP:
-      result = True
-    else:
-      result = self.ping_check()
-
-    if result:
-      self.debug("Occupancy Check: %s (one or more devices within property)" % result)
-    else:
-      self.debug("Occupancy Check: %s (no devices within property)" % result)
-
-    return result
-
-  def ping_check(self):
-    self.debug("Pinging remote hosts...")
-
-    dlist = random.sample(self.devices, len(self.devices)) if self.randomise else self.devices
-
-    for device in dlist:
-      fqname, ipaddress = self.getHostDetails(device)
-      if ipaddress:
-        try:
-          if sys.platform == "win32":
-            response = subprocess.check_output(["ping", "-n", "%d" % self.pings, "-w", "1000", ipaddress],
-                                               stderr=subprocess.STDOUT).decode("utf-8")
-          else:
-            response = subprocess.check_output(["ping", "-c","%d" % self.pings, "-W", "1", ipaddress],
-                                               stderr=subprocess.STDOUT).decode("utf-8")
-        except (subprocess.CalledProcessError) as e:
-          response = e.output
-
-        (sent, received, lost, errors, pctloss) = self.extractPacketStats(response)
-        self.debug("* Ping stats for %s: %d sent, %d received, %d lost (%d%% loss), %d errors" %
-          (fqname, sent, received, lost, pctloss, errors))
-
-        if received != 0:
-          self.debug("** Got Ping reply from: %s [%s]" % (fqname, ipaddress))
-          return True
-        else:
-          self.debug("** No Ping reply from: %s [%s]" % (fqname, ipaddress))
-      else:
-        self.debug("** Invalid Device: %s (no ip address)" % fqname)
-    else:
-      return False
-
-  def extractPacketStats(self, response):
-    re_match = None
-    re_group = None
-    replies = 0
-    for line in response.split("\n"):
-      if not line: continue
-      if re_match:
-        re_group = re.search("^.*?(\d+).*?(\d+).*?(\d+) errors.*?(\d+)%.*$", line)
-        if not re_group:
-          re_group = re.search("^.*?(\d+).*?(\d+).*?(\d+)%.*$", line)
-        break
-      else:
-        if re.match(".*from.* ttl=.*$", line, flags=re.IGNORECASE):
-          replies += 1
-        else:
-          re_match = re.search("^.*?ping statistics.*", line, flags=re.IGNORECASE)
-
-    # Sent/Received/Lost/Errors/% Loss
-    r = [0, 0, 0, 0, 0]
-    if re_group and len(re_group.groups()) != 0:
-      r[0] = int(re_group.group(1)) # Sent
-      r[1] = replies if sys.platform == "win32" else int(re_group.group(2))
-      if len(re_group.groups()) == 4: # s/r/e/%
-        r[3] = int(re_group.group(3)) # Errors
-
-      # Calculate lost and % loss
-      r[2] = r[0] - r[1]
-      r[4] = int(100*(1-(float(r[1])/float(r[0]))))
-
-    return(tuple(r))
-
-  def arp_check(self):
-    self.debug("Checking ARP Cache...")
-
-    arp = {}
-
-    if sys.platform == "win32":
-      try:
-        response = subprocess.check_output(["arp", "-a"],
-                                           stderr=subprocess.STDOUT).decode("utf-8")
-        for line in response.split("\r\n"):
-          if line:
-            match = re.match(" *([0-9]*\.[0-9]*\.[0-9]*\.[0-9]*) *([^ ]*) *([^ ]*)", line)
-            if match and match.group(3) != "invalid":
-              arp[match.group(1)] = match.group(3)
-      except (OSError, subprocess.CalledProcessError) as e:
-        pass
-    else:
-      try:
-        response = subprocess.check_output(["arp", "-a"],
-                                           stderr=subprocess.STDOUT).decode("utf-8")
-        for line in response.split("\n"):
-          if line:
-            match = re.match(".* \(([0-9]*\.[0-9]*\.[0-9]*\.[0-9]*)\).*", line)
-            if match:
-              arp[match.group(1)] = "OK"
-      except (OSError, subprocess.CalledProcessError) as e:
-        try:
-          response = subprocess.check_output(["ip", "neighbor", "list"],
-                                             stderr=subprocess.STDOUT).decode("utf-8")
-          for line in response.split("\n"):
-            if line:
-              match = re.match("^([0-9]*\.[0-9]*\.[0-9]*\.[0-9]*).* (.*)$", line)
-              if match and match.group(2) != "FAILED":
-                arp[match.group(1)] = match.group(2)
-        except (OSError, subprocess.CalledProcessError) as e:
-          pass
-
-    self.debug("* ARP Cache has %d entrie(s)" % len(arp))
-
-    for device in self.devices:
-      fqname, ipaddress = self.getHostDetails(device)
-      if ipaddress in arp:
-        self.debug("** Found in ARP Cache: %s [%s]" % (fqname, ipaddress))
-        return True
-      else:
-        self.debug("** Not in ARP Cache: %s [%s]" % (fqname, ipaddress))
-    else:
-      return False
-
-  def getHostDetails(self, device):
-    try:
-      fqname = socket.getfqdn(device) if self.reverse else device
-      ipaddress = socket.gethostbyname(device)
-      return (fqname, ipaddress)
-    except (socket.gaierror, socket.error):
-      self.debug("Can't resolve hostname: %s" % device)
-      return (device, None)
-
-  def SetStatus(self, isOccupied):
-    if isOccupied:
-      self.last_seen = time.time()
-
-      if self.first_seen == 0:
-        self.first_seen = self.last_seen
-
-      if self.first_notseen != 0:
-        self.time_vacant = self.first_seen - self.first_notseen
-        self.first_notseen = self.last_notseen = 0
-    else:
-      self.last_notseen = time.time()
-      if self.first_notseen == 0:
-        self.first_notseen = self.last_notseen
-
-      if self.first_seen != 0:
-        self.time_occupied = self.first_notseen - self.first_seen
-        self.first_seen = self.last_seen = 0
-
   def PropertyIsOccupied(self):
-    self.SetStatus(self.CheckForOccupancy())
+    is_occupied = self.get_status()
+
+    if is_occupied:
+      self.debug("Occupancy Check: %s (one or more devices within property)" % is_occupied)
+    else:
+      if self.first_notseen > 0:
+        gp_remaining = self.grace_period_secs - (time.time() - self.first_notseen)
+      else:
+        gp_remaining = self.grace_period_secs
+      gp_msg = "elapsed" if gp_remaining <= 0 else self.secsToTime(gp_remaining, "%dm %02ds")
+      self.debug("Occupancy Check: %s (no devices within property, grace period remaining: %s)" % (is_occupied, gp_msg))
+
+    self.set_status(is_occupied)
+
     if self.first_notseen != 0 and (time.time() - self.first_notseen) >= self.grace_period_secs:
       return False
     else:
@@ -311,6 +173,198 @@ class AutoAway(object):
 
     time.sleep(sleep_time)
 
+  def get_status(self):
+    # If checking ARP, or trying to resolve MAC addresses, then get the ARP cache
+    if self.use_arp or self.dynamic_list:
+      arp = self.get_arp_cache()
+
+      # If we have MAC addresses, learn their IP address
+      self.learn_mac_hosts(arp)
+    else:
+      arp = []
+
+    if self.use_arp and self.arp_check(arp):
+      return True
+    else:
+      return self.ping_check()
+
+  def set_status(self, isOccupied):
+    if isOccupied:
+      self.last_seen = time.time()
+
+      if self.first_seen == 0:
+        self.first_seen = self.last_seen
+
+      if self.first_notseen != 0:
+        self.time_vacant = self.first_seen - self.first_notseen
+        self.first_notseen = self.last_notseen = 0
+    else:
+      self.last_notseen = time.time()
+      if self.first_notseen == 0:
+        self.first_notseen = self.last_notseen
+
+      if self.first_seen != 0:
+        self.time_occupied = self.first_notseen - self.first_seen
+        self.first_seen = self.last_seen = 0
+
+  def ping_check(self):
+    self.debug("Pinging remote hosts...")
+
+    dlist = [x for x in self.static_list + self.dynamic_list if x[1] != ""]
+    if self.randomise:
+      dlist = random.sample(dlist, len(dlist))
+
+    for host in dlist:
+      mac = host[0]
+      ip = host[1]
+      fqname, ipaddress = self.get_host_details(ip)
+      if ipaddress:
+        try:
+          if sys.platform == "win32":
+            response = subprocess.check_output(["ping", "-n", "%d" % self.pings, "-w", "1000", ipaddress],
+                                               stderr=subprocess.STDOUT).decode("utf-8")
+          else:
+            response = subprocess.check_output(["ping", "-c","%d" % self.pings, "-W", "1", ipaddress],
+                                               stderr=subprocess.STDOUT).decode("utf-8")
+        except (subprocess.CalledProcessError) as e:
+          response = e.output
+
+        (sent, received, lost, errors, pctloss) = self.get_ping_stats(response)
+        self.debug("* Ping stats for %s: %d sent, %d received, %d lost (%d%% loss), %d errors" %
+          (fqname, sent, received, lost, pctloss, errors))
+
+        if received != 0:
+          self.debug("** Got Ping reply from: %s [%s]" % (fqname, ipaddress))
+          return True
+        else:
+          self.debug("** No Ping reply from: %s [%s]" % (fqname, ipaddress))
+      else:
+        self.debug("** Invalid Device: %s (no ip address)" % fqname)
+    else:
+      return False
+
+  def get_ping_stats(self, response):
+    re_match = None
+    re_group = None
+    replies = 0
+    for line in response.split("\n"):
+      if not line: continue
+      if re_match:
+        re_group = re.search("^.*?(\d+).*?(\d+).*?(\d+) errors.*?(\d+)%.*$", line)
+        if not re_group:
+          re_group = re.search("^.*?(\d+).*?(\d+).*?(\d+)%.*$", line)
+        break
+      else:
+        if re.match(".*from.* ttl=.*$", line, flags=re.IGNORECASE):
+          replies += 1
+        else:
+          re_match = re.search("^.*?ping statistics.*", line, flags=re.IGNORECASE)
+
+    # Sent/Received/Lost/Errors/% Loss
+    r = [0, 0, 0, 0, 0]
+    if re_group and len(re_group.groups()) != 0:
+      r[0] = int(re_group.group(1)) # Sent
+      r[1] = replies if sys.platform == "win32" else int(re_group.group(2))
+      if len(re_group.groups()) == 4: # s/r/e/%
+        r[3] = int(re_group.group(3)) # Errors
+
+      # Calculate lost and % loss
+      r[2] = r[0] - r[1]
+      r[4] = int(100*(1-(float(r[1])/float(r[0]))))
+
+    return(tuple(r))
+
+  def get_arp_cache(self):
+    self.debug("Loading ARP Cache...")
+
+    arp = []
+
+    if sys.platform == "win32":
+      try:
+        response = subprocess.check_output(["arp", "-a"],
+                                           stderr=subprocess.STDOUT).decode("utf-8")
+        pattern = re.compile(" *([0-9]*\.[0-9]*\.[0-9]*\.[0-9]*) *([^ ]*) *([^ ]*)")
+        for line in response.split("\r\n"):
+          if line:
+            match = re.match(pattern, line)
+            if match and match.group(3) != "invalid":
+              arp.append({"mac": match.group(2).replace("-", ":"), "ip": match.group(1), "type": match.group(3)})
+      except (OSError, subprocess.CalledProcessError) as e:
+        pass
+    else:
+      try:
+        response = subprocess.check_output(["arp", "-a"],
+                                           stderr=subprocess.STDOUT).decode("utf-8")
+        pattern = re.compile(".* \(([0-9]*\.[0-9]*\.[0-9]*\.[0-9]*)\) at (.*) on (.*)")
+        for line in response.split("\n"):
+          if line:
+            match = re.match(pattern, line)
+            if match and self.isMAC(match.group(2)): # Got a MAC address...
+              arp.append({"mac": match.group(2).split(" ")[0], "ip": match.group(1), "type": match.group(3)})
+      except (OSError, subprocess.CalledProcessError) as e:
+        try:
+          response = subprocess.check_output(["ip", "neighbor", "list"],
+                                             stderr=subprocess.STDOUT).decode("utf-8")
+          pattern = re.compile("^([0-9]*\.[0-9]*\.[0-9]*\.[0-9]*) .* .* (.*) (.*)$")
+          for line in response.split("\n"):
+            if line:
+              match = re.match(pattern, line)
+              if match and self.isMAC(match.group(2)): # Got a MAC address...
+                arp.append({"mac": match.group(2), "ip": match.group(1), "type": match.group(3)})
+        except (OSError, subprocess.CalledProcessError) as e:
+          pass
+
+    self.debug("* ARP Cache has %d entrie(s)" % len(arp))
+
+    return arp
+
+  def arp_check(self, arp):
+    if not arp: return False
+
+    for host in [x for x in self.static_list + self.dynamic_list if x[1] != ""]:
+      mac = host[0]
+      ip = host[1]
+      fqname, ipaddress = self.get_host_details(ip)
+      for nic in arp:
+        if ipaddress == nic["ip"]:
+          self.debug("** Found in ARP Cache: %s [%s]" % (fqname, ipaddress))
+          return True
+      else:
+        self.debug("** Not in ARP Cache: %s [%s]" % (fqname, ipaddress))
+    else:
+      return False
+
+  def learn_mac_hosts(self, arp_list):
+    if not self.dynamic_list: return
+
+    for index, host in enumerate(self.dynamic_list):
+      mac = host[0]
+      ip = host[1]
+      for nic in arp_list:
+        # Learn new IP address for this MAC
+        if mac == nic["mac"]:
+          if ip != nic["ip"]:
+            self.dynamic_list[index] = (mac, nic["ip"])
+            self.debug("* New IP address learned: %s -> %s" % (mac, nic["ip"]))
+          break
+        # Forget any learned IP addresses if now assigned to a different MAC
+        elif mac != nic["mac"] and ip == nic["ip"]:
+            self.dynamic_list[index] = (mac, "")
+            self.debug("* Old IP address unlearned: %s (%s re-allocated to %s)" % (mac, nic["ip"], nic["mac"]))
+            break
+
+  def isMAC(self, possible_mac):
+    return possible_mac.count(":") == 5
+
+  def get_host_details(self, device):
+    try:
+      fqname = socket.getfqdn(device) if self.reverse else device
+      ipaddress = socket.gethostbyname(device)
+      return (fqname, ipaddress)
+    except (socket.gaierror, socket.error):
+      self.debug("Can't resolve hostname: %s" % device)
+      return (device, None)
+
   # Return an interval that schedules the next sleep period
   # for either the default number of seconds (occupied_sleep)
   # or calculates when the next check_every should occur (eg.
@@ -327,12 +381,15 @@ class AutoAway(object):
 
   def secsToTime(self, secs, format=None):
     (days, hours, mins, seconds) = (int(secs/86400), int(secs/3600) % 24, int(secs/60) % 60, secs % 60)
-    items = format.count("%") if format else 0
 
-    if format and items == 4:
-      return format % (days, hours, mins, seconds)
-    elif format and items == 3:
-      return format % (hours, mins, seconds)
+    if format:
+      items = format.count("%") if format else 0
+      if items == 4:
+        return format % (days, hours, mins, seconds)
+      elif items == 3:
+        return format % (hours, mins, seconds)
+      elif items == 2:
+        return format % (mins, seconds)
     else:
       return "%dd %02d:%02d:%02d" % (days, hours, mins, seconds)
 
@@ -353,10 +410,10 @@ class AutoAway(object):
 
 #===================
 
-def checkVersion(args):
+def CheckVersion(args):
   global GITHUB, VERSION
 
-  (remoteVersion, remoteHash) = getLatestVersion()
+  (remoteVersion, remoteHash) = get_latest_version()
 
   if args.version:
     print("Current Version: v%s" % VERSION)
@@ -371,10 +428,10 @@ def checkVersion(args):
     url = GITHUB.replace("//raw.","//").replace("/master","/blob/master")
     print("Full changelog: %s/CHANGELOG.md" % url)
 
-def downloadLatestVersion(args):
+def DownloadLatestVersion(args):
   global GITHUB, VERSION
 
-  (remoteVersion, remoteHash) = getLatestVersion()
+  (remoteVersion, remoteHash) = get_latest_version()
 
   if not remoteVersion:
     print("FATAL: Unable to determine version of the latest file, check internet and github.com are available.")
@@ -416,7 +473,7 @@ def downloadLatestVersion(args):
 
   print("Successfully updated from v%s to v%s" % (VERSION, remoteVersion))
 
-def getLatestVersion():
+def get_latest_version():
   global GITHUB, ANALYTICS, VERSION
 
   # Need user agent etc. for analytics
@@ -438,15 +495,15 @@ def getLatestVersion():
   HEADERS.append(('Referer', "http://www.%s" % USAGE))
 
   # Try checking version via Analytics URL
-  (remoteVersion, remoteHash) = getLatestVersion_ex(ANALYTICS, headers = HEADERS, checkerror = False)
+  (remoteVersion, remoteHash) = get_latest_version_ex(ANALYTICS, headers = HEADERS, checkerror = False)
 
   # If the Analytics call fails, go direct to github
   if remoteVersion == None or remoteHash == None:
-    (remoteVersion, remoteHash) = getLatestVersion_ex("%s/%s" % (GITHUB, "VERSION"))
+    (remoteVersion, remoteHash) = get_latest_version_ex("%s/%s" % (GITHUB, "VERSION"))
 
   return (remoteVersion, remoteHash)
 
-def getLatestVersion_ex(url, headers=None, checkerror=True):
+def get_latest_version_ex(url, headers=None, checkerror=True):
   GLOBAL_TIMEOUT = socket.getdefaulttimeout()
   ITEMS = (None, None)
 
@@ -470,9 +527,9 @@ def getLatestVersion_ex(url, headers=None, checkerror=True):
     if len(items) == 2:
       ITEMS = items
     else:
-      if checkerror: print("Bogus data in getLatestVersion_ex(): url [%s], data [%s]" % (url, data))
+      if checkerror: print("Bogus data in get_latest_version_ex(): url [%s], data [%s]" % (url, data))
   except Exception as e:
-    if checkerror: print("Exception in getLatestVersion_ex(): url [%s], text [%s]" % (url, e))
+    if checkerror: print("Exception in get_latest_version_ex(): url [%s], text [%s]" % (url, e))
 
   socket.setdefaulttimeout(GLOBAL_TIMEOUT)
   return ITEMS
@@ -484,13 +541,13 @@ def init():
 
   GITHUB = "https://raw.github.com/MilhouseVH/autoaway.py/master/"
   ANALYTICS = "http://goo.gl/ZTe1mN"
-  VERSION = "0.0.3"
+  VERSION = "0.0.4"
 
   parser = argparse.ArgumentParser(description="Manage auto-away status based on presence of mobile devices",
                     formatter_class=lambda prog: argparse.HelpFormatter(prog,max_help_position=25,width=90))
 
   parser.add_argument("-d", "--devices", metavar="DEVICE", nargs="+", \
-                      help="List of devices to be monitored (hostnames or IPv4 address)")
+                      help="List of devices to be monitored (hostnames, IPv4 address or colon-delimited MAC)")
 
   parser.add_argument("-g", "--grace", metavar="MINUTES", type=int, default=15, \
                       help="Grace period after last device seen, in minutes")
@@ -518,20 +575,21 @@ def init():
 
   parser.add_argument("-p", "--pings", type=int, choices=range(1, 6), default=1, \
                       help="Number of ping requests - default: 1. Increase if poor WiFi reception \
-                            leads to false \"away\" detection.")
+                            leads to false postive \"away\" detection.")
   parser.add_argument("--noarp", action="store_true", \
-                      help="Do not try to find devices in ARP cache")
+                      help="Do not try to find devices in ARP cache. ARP cache will still be used \
+                            to resolve MAC addresses to IP, if MAC addresses are to be monitored.")
   parser.add_argument("--noreverse", action="store_true", \
                       help="No reverse lookup on device names")
   parser.add_argument("--norandom", action="store_true", \
-                      help="Do not randomise order devices are communicated with - \
+                      help="Do not randomise order in which devices are communicated with - \
                             use strict left-to-right order devices appear on command line")
 
   group = parser.add_mutually_exclusive_group()
-  group.add_argument("--version", action="store_true", \
-                      help="Display current version and notify if a new version is available")
   group.add_argument("--nocheck", action="store_true", \
                       help="Do not automatically notify new version availability")
+  group.add_argument("--version", action="store_true", \
+                      help="Display current version and notify if a new version is available")
 
   group = parser.add_argument_group('Version upgrade').add_mutually_exclusive_group()
   group.add_argument("--update", action="store_true", \
@@ -548,9 +606,9 @@ def init():
 
   if args.version or args.update or args.fupdate:
     if args.version:
-      checkVersion(args)
+      CheckVersion(args)
     else:
-      downloadLatestVersion(args)
+      DownloadLatestVersion(args)
     sys.exit(1)
 
   if args.notify and not os.path.exists(args.notify):
@@ -559,7 +617,7 @@ def init():
   if args.devices == None:
     parser.error("argument -d/--devices is required")
 
-  if not args.nocheck: checkVersion(args)
+  if not args.nocheck: CheckVersion(args)
 
   return args
 
@@ -567,7 +625,7 @@ def log(msg):
   print("%s: %s" % (datetime.datetime.now(), msg))
   sys.stdout.flush()
 
-def PresenceChanged(autoaway, isOccupied):
+def OccupancyChange(autoaway, isOccupied):
   if isOccupied:
     log("Property is occupied - vacant for %s" % autoaway.GetVacantPeriod())
   else:
@@ -595,19 +653,36 @@ def main(args):
     now_occupied = autoaway.PropertyIsOccupied()
     now_seen = autoaway.DevicesSeen()
 
-    if now_occupied:
+    if prev_occupied and now_occupied:
       if prev_seen and not now_seen:
         log("No device(s) present, property vacated? %d minute grace period commencing..." % args.grace)
       elif not prev_seen and now_seen:
         log("Device(s) now present - property re-occupied during grace period")
 
     if now_occupied != prev_occupied:
-      PresenceChanged(autoaway, now_occupied)
+      OccupancyChange(autoaway, now_occupied)
 
     prev_occupied = now_occupied
     prev_seen = now_seen
 
+def xx():
+  lines = ["n950.local (192.168.0.47) at <incomplete> on eth0",
+           "raspberrypi.local (192.168.0.4) at b8:27:eb:13:ed:b6 [ether] on eth0"]
+
+
+  lines = ["192.168.0.47 dev eth0  FAILED",
+           "192.168.0.4 dev eth0 lladdr b8:27:eb:13:ed:b6 REACHABLE"]
+
+#  pattern = re.compile("^([0-9]*\.[0-9]*\.[0-9]*\.[0-9]*).* (.*)$")
+  pattern = re.compile("^([0-9]*\.[0-9]*\.[0-9]*\.[0-9]*) .* .* (.*) (.*)$")
+
+  for line in lines:
+    match = re.match(pattern, line)
+    if match: print(match.groups())
+  sys.exit(2)
+
 try:
+#  xx()
   main(init())
 except (KeyboardInterrupt, SystemExit) as e:
   if type(e) == SystemExit: sys.exit(int(str(e)))

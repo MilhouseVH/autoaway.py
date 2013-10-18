@@ -1,5 +1,9 @@
 #Changelog
 
+##Version 0.0.4 (18/10/2013)
+* Add support for MAC addresses, automatically learning IP from ARP cache
+* Although `--noarp` will disable ARP checking, the ARP cache will still be retrieved if MAC addresses are being monitored
+
 ##Version 0.0.3 (16/10/2013)
 * Add --check-every option to use a more regular check interval (eg. --check-every 15 would check at precise 00, 15, 30 and 45 minute intervals).
 * Remove sys.exit() from init()
