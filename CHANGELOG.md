@@ -1,5 +1,8 @@
 #Changelog
 
+##Version 0.0.6 (23/10/2013)
+* Add extra detection checks when transitioning from seen to not seen to avoid false negative
+
 ##Version 0.0.5 (18/10/2013)
 * Ping flood the subnet at startup to resolve unknown MAC addresses.
 * Add `--subnet` option to specify subnet if it is incorrectly guessed from ARP cache (eg. `--subnet 192.168.0`)

@@ -117,6 +117,17 @@ class AutoAway(object):
   def PropertyIsOccupied(self):
     is_occupied = self.get_status()
 
+    # If transitioning from seen to not seen, check up to 3 more times
+    # to avoid false positives
+    if not is_occupied and self.DevicesSeen():
+      CHECK_MAX=3
+      for i in range(1, CHECK_MAX+1):
+        if is_occupied:
+          break
+        time.sleep(5)
+        self.debug("Potential occupancy transition - extra check %d of %d" % (i, CHECK_MAX))
+        is_occupied = self.get_status()
+
     if is_occupied:
       self.debug("Occupancy Check: %s (one or more devices within property)" % is_occupied)
     else:
@@ -633,7 +644,7 @@ def init():
 
   GITHUB = "https://raw.github.com/MilhouseVH/autoaway.py/master/"
   ANALYTICS = "http://goo.gl/ZTe1mN"
-  VERSION = "0.0.5"
+  VERSION = "0.0.6"
 
   parser = argparse.ArgumentParser(description="Manage auto-away status based on presence of mobile devices",
                     formatter_class=lambda prog: argparse.HelpFormatter(prog,max_help_position=25,width=90))
