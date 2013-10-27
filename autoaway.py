@@ -128,11 +128,12 @@ class AutoAway(object):
         self.debug("Potential occupancy transition - extra check %d of %d" % (i, CHECK_MAX))
         is_occupied = self.get_status()
 
+    now = int(time.time())
     if is_occupied:
       self.debug("Occupancy Check: %s (one or more devices within property)" % is_occupied)
     else:
       if self.first_notseen > 0:
-        gp_remaining = self.grace_period_secs - (time.time() - self.first_notseen)
+        gp_remaining = self.grace_period_secs - (now - self.first_notseen)
       else:
         gp_remaining = self.grace_period_secs
       gp_msg = "elapsed" if gp_remaining <= 0 else self.secsToTime(gp_remaining, "%dm %02ds")
@@ -140,7 +141,7 @@ class AutoAway(object):
 
     self.set_status(is_occupied)
 
-    if self.first_notseen != 0 and (time.time() - self.first_notseen) >= self.grace_period_secs:
+    if self.first_notseen != 0 and (now - self.first_notseen) >= self.grace_period_secs:
       return False
     else:
       return True
@@ -227,8 +228,10 @@ class AutoAway(object):
       return self.ping_check()
 
   def set_status(self, isOccupied):
+    now = int(time.time())
+
     if isOccupied:
-      self.last_seen = time.time()
+      self.last_seen = now
 
       if self.first_seen == 0:
         self.first_seen = self.last_seen
@@ -237,7 +240,8 @@ class AutoAway(object):
         self.time_vacant = self.first_seen - self.first_notseen
         self.first_notseen = self.last_notseen = 0
     else:
-      self.last_notseen = time.time()
+      self.last_notseen = now
+
       if self.first_notseen == 0:
         self.first_notseen = self.last_notseen
 
@@ -644,7 +648,7 @@ def init():
 
   GITHUB = "https://raw.github.com/MilhouseVH/autoaway.py/master/"
   ANALYTICS = "http://goo.gl/ZTe1mN"
-  VERSION = "0.0.6"
+  VERSION = "0.0.7"
 
   parser = argparse.ArgumentParser(description="Manage auto-away status based on presence of mobile devices",
                     formatter_class=lambda prog: argparse.HelpFormatter(prog,max_help_position=25,width=90))

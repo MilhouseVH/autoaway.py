@@ -1,5 +1,8 @@
 #Changelog
 
+##Version 0.0.7 (27/10/2013)
+* Cast time.time() to int to avoid stray fractional seconds
+
 ##Version 0.0.6 (23/10/2013)
 * Add extra detection checks when transitioning from seen to not seen to avoid false negative
 
