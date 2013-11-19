@@ -382,7 +382,8 @@ class AutoAway(object):
             if line:
               match = re.match(pattern, line)
               if match and self.isMAC(match.group(2)): # Got a MAC address...
-                arp.append({"mac": match.group(2), "ip": match.group(1), "type": match.group(3)})
+                if match.group(3).upper() == "REACHABLE":
+                  arp.append({"mac": match.group(2), "ip": match.group(1), "type": match.group(3)})
         except (subprocess.CalledProcessError) as e:
           pass
 
@@ -490,7 +491,7 @@ class AutoAway(object):
       self.log("[debug] %s" % msg)
 
   def log(self, msg):
-    print("%s: %s" % (datetime.datetime.now(), msg))
+    sys.stdout.write("%s: %s\n" % (datetime.datetime.now(), msg))
     sys.stdout.flush()
 
 # Simple ping thread so that an entire subnet can be sent ICMP requests
@@ -517,57 +518,62 @@ class MyPingThread(threading.Thread):
 
 #===================
 
-def CheckVersion(args):
+def checkVersion(args):
   global GITHUB, VERSION
 
   (remoteVersion, remoteHash) = get_latest_version()
 
   if args.version:
-    print("Current Version: v%s" % VERSION)
-    print("Latest  Version: %s" % ("v" + remoteVersion if remoteVersion else "Unknown"))
-    print("")
+    printout("Current Version: v%s" % VERSION)
+    printout("Latest  Version: %s" % ("v" + remoteVersion if remoteVersion else "Unknown"))
+    printout("")
 
   if remoteVersion and remoteVersion > VERSION:
-    print("A new version of this script is available - use the \"update\" option to automatically apply update.")
-    print("")
+    printout("A new version of this script is available - use the \"--update\" option to automatically apply update.")
+    printout("")
 
   if args.version:
     url = GITHUB.replace("//raw.","//").replace("/master","/blob/master")
-    print("Full changelog: %s/CHANGELOG.md" % url)
+    printout("Full changelog: %s/CHANGELOG.md" % url)
 
-def DownloadLatestVersion(args):
+def downloadLatestVersion(args, autoupdate=False):
   global GITHUB, VERSION
 
   (remoteVersion, remoteHash) = get_latest_version()
 
+  if autoupdate and (not remoteVersion or remoteVersion <= VERSION):
+    return False
+
   if not remoteVersion:
-    print("FATAL: Unable to determine version of the latest file, check internet and github.com are available.")
+    printerr("FATAL: Unable to determine version of the latest file, check internet and github.com are available.")
     return
 
   if not args.fupdate and remoteVersion <= VERSION:
-    print("Current version is already up to date - no update required.")
+    printerr("Current version is already up to date - no update required.")
     return
 
   try:
     response = urllib2.urlopen("%s/%s" % (GITHUB, "autoaway.py"))
     data = response.read()
   except Exception as e:
-    print("Exception in downloadLatestVersion(): %s" % e)
-    print("FATAL: Unable to download latest version, check internet and github.com are available.")
+    if autoupdate: return False
+    printerr("Exception in downloadLatestVersion(): %s" % e)
+    printerr("FATAL: Unable to download latest version, check internet and github.com are available.")
     return
 
   digest = hashlib.md5()
   digest.update(data)
 
   if (digest.hexdigest() != remoteHash):
-    print("FATAL: Checksum of new version is incorrect, possibly corrupt download - abandoning update.")
+    if autoupdate: return False
+    printerr("FATAL: Checksum of new version is incorrect, possibly corrupt download - abandoning update.")
     return
 
   path = os.path.realpath(__file__)
   dir = os.path.dirname(path)
 
   if os.path.exists("%s%s.git" % (dir, os.sep)):
-    print("FATAL: Might be updating version in git repository... Abandoning update!")
+    printerr("FATAL: Might be updating version in git repository... Abandoning update!")
     return
 
   try:
@@ -575,10 +581,12 @@ def DownloadLatestVersion(args):
     THISFILE.write(data)
     THISFILE.close()
   except:
-    print("FATAL: Unable to update current file, check you have write access")
-    return
+    if not autoupdate:
+      printerr("FATAL: Unable to update current file, check you have write access")
+    return False
 
-  print("Successfully updated from v%s to v%s" % (VERSION, remoteVersion))
+  printout("Successfully updated from v%s to v%s" % (VERSION, remoteVersion))
+  return True
 
 def get_latest_version():
   global GITHUB, ANALYTICS, VERSION
@@ -634,21 +642,33 @@ def get_latest_version_ex(url, headers=None, checkerror=True):
     if len(items) == 2:
       ITEMS = items
     else:
-      if checkerror: print("Bogus data in get_latest_version_ex(): url [%s], data [%s]" % (url, data))
+      if checkerror: printerr("Bogus data in get_latest_version_ex(): url [%s], data [%s]" % (url, data))
   except Exception as e:
-    if checkerror: print("Exception in get_latest_version_ex(): url [%s], text [%s]" % (url, e))
+    if checkerror: printerr("Exception in get_latest_version_ex(): url [%s], text [%s]" % (url, e))
 
   socket.setdefaulttimeout(GLOBAL_TIMEOUT)
   return ITEMS
 
+#
+# Download new version if available, then replace current
+# process - os.execl() doesn't return.
+#
+# Do nothing if newer version not available.
+#
+def autoUpdate(args):
+  if downloadLatestVersion(args, autoupdate=True):
+    argv = sys.argv
+    argv.append("--nocheck")
+    os.execl(sys.executable, sys.executable, *argv)
+
 #===================
 
 def init():
-  global GITHUB, ANALYTICS, VERSION
+  global GITHUB, ANALYTICS, VERSION, VERBOSE
 
   GITHUB = "https://raw.github.com/MilhouseVH/autoaway.py/master/"
   ANALYTICS = "http://goo.gl/ZTe1mN"
-  VERSION = "0.0.7"
+  VERSION = "0.0.8"
 
   parser = argparse.ArgumentParser(description="Manage auto-away status based on presence of mobile devices",
                     formatter_class=lambda prog: argparse.HelpFormatter(prog,max_help_position=25,width=90))
@@ -713,13 +733,15 @@ def init():
 
   args = parser.parse_args()
 
+  VERBOSE = args.verbose
+
   if not (args.check_every or args.occupied_sleep): args.check_every = 15
 
   if args.version or args.update or args.fupdate:
     if args.version:
-      CheckVersion(args)
+      checkVersion(args)
     else:
-      DownloadLatestVersion(args)
+      downloadLatestVersion(args)
     sys.exit(1)
 
   if args.notify and not os.path.exists(args.notify):
@@ -728,19 +750,29 @@ def init():
   if args.devices == None:
     parser.error("argument -d/--devices is required")
 
-  if not args.nocheck: CheckVersion(args)
+  if not args.nocheck: autoUpdate(args)
 
   return args
 
-def log(msg):
-  print("%s: %s" % (datetime.datetime.now(), msg))
+def printout(msg, newLine=True):
+  sys.stdout.write(msg)
+  if newLine: sys.stdout.write("\n")
+  sys.stdout.flush()
+
+def printerr(msg, newLine=True):
+  sys.stderr.write(msg)
+  if newLine: sys.stderr.write("\n")
+  sys.stderr.flush()
+
+def printlog(msg):
+  sys.stdout.write("%s: %s\n" % (datetime.datetime.now(), msg))
   sys.stdout.flush()
 
 def OccupancyChange(autoaway, isOccupied):
   if isOccupied:
-    log("Property is occupied - vacant for %s" % autoaway.GetVacantPeriod())
+    printlog("Property is occupied - vacant for %s" % autoaway.GetVacantPeriod())
   else:
-    log("Property is vacant - occupied for %s" % autoaway.GetOccupiedPeriod())
+    printlog("Property is vacant - occupied for %s" % autoaway.GetOccupiedPeriod())
 
   autoaway.ExecuteNotification(isOccupied)
 
@@ -756,7 +788,7 @@ def main(args):
   prev_occupied = autoaway.PropertyIsOccupied()
   prev_seen= autoaway.DevicesSeen()
 
-  log("Startup status: %s" % ("Occupied" if prev_occupied else "Vacant"))
+  printlog("Startup status: %s" % ("Occupied" if prev_occupied else "Vacant"))
 
   while True:
     autoaway.Wait()
@@ -766,9 +798,9 @@ def main(args):
 
     if prev_occupied and now_occupied:
       if prev_seen and not now_seen:
-        log("No device(s) present, property vacated? %d minute grace period commencing..." % args.grace)
+        printlog("No device(s) present, property vacated? %d minute grace period commencing..." % args.grace)
       elif not prev_seen and now_seen:
-        log("Device(s) now present - property re-occupied during grace period")
+        printlog("Device(s) now present - property re-occupied during grace period")
 
     if now_occupied != prev_occupied:
       OccupancyChange(autoaway, now_occupied)

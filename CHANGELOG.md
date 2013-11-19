@@ -1,5 +1,9 @@
 #Changelog
 
+##Version 0.0.8 (18/11/2013)
+* Restrict "ip" based arp cache to reachable devices only
+* Add auto-update facility, will automatically update to latest version of script unless disabled with `--nocheck`. Manually update with `--update` option. Check current version with `--version` option.
+
 ##Version 0.0.7 (27/10/2013)
 * Cast time.time() to int to avoid stray fractional seconds
 
