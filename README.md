@@ -48,8 +48,8 @@ optional arguments:
                          Both a start and end time must be specified for off-peak to be
                          enabled.
   -ce MIUNUTES, --check-every MIUNUTES
-                         Schedule device checks at regular MINUTES intervals, eg. 5, or
-                         10. Range 1..60. Default is 15.
+                         Schedule device checks at regular MINUTES interval, eg. 5, or 10.
+                         Range 1..60. Default is 15.
   -os SECONDS, --occupied-sleep SECONDS
                          Alternative sleep interval used when property is oocupied.
                          Specified in seconds. Less regular than --check-every.
@@ -58,7 +58,8 @@ optional arguments:
                          seconds.
   -n FILENAME, --notify FILENAME
                          Execute FILENAME when change of occupancy occurs - passed "here"
-                         or "away" as argument
+                         or "away" as arg1, here/away period in seconds as arg2 and
+                         here/away period in "d h:m:s" format as arg3
   -s SUBNET, --subnet SUBNET
                          If only MAC addresses are specified, ping flood the subnet to
                          resolve IP addresses. Default is to extract subnet from ARP
@@ -101,6 +102,11 @@ BIN=$(readlink -f $(dirname $0))
 
 echo "Updating Nest with away status: $1"
 $BIN/nest.py --user joe@user.com --password swordfish away $1
+if [ "$1" = "here" ]; then
+  echo "Property vacant for $3 ($2 seconds)"
+else
+  echo "Property occupied for $3 ($2 seconds)"
+fi
 ```
 
 Note that nest.py can be obtained from https://github.com/jsquyres/pynest

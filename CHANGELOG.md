@@ -1,5 +1,8 @@
 #Changelog
 
+##Version 0.0.9 (19/11/2013)
+* Add: Extra arguments on call to --notify script, now pass arg1: status (away/here), arg2: here/away period in seconds, arg3: here/away period in "d h:m:s" format.
+
 ##Version 0.0.8 (18/11/2013)
 * Restrict "ip" based arp cache to reachable devices only
 * Add auto-update facility, will automatically update to latest version of script unless disabled with `--nocheck`. Manually update with `--update` option. Check current version with `--version` option.

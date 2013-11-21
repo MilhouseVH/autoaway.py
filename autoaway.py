@@ -160,10 +160,19 @@ class AutoAway(object):
 
   def ExecuteNotification(self, isOccupied):
     if self.notify:
-      value = "here" if isOccupied else "away"
-      self.debug("Calling notify [%s] with value [%s]" % (self.notify, value))
+      if isOccupied:
+        value = "here"
+        period1 = "%d" % int(self.time_vacant)
+        period2 = self.GetVacantPeriod()
+      else:
+        value = "away"
+        period1 = "%d" % int(self.time_occupied)
+        period2 = self.GetOccupiedPeriod()
+
+      self.debug("Calling notify [%s] with arg1 [%s], arg2 [%s], arg3 [%s]" % (self.notify, value, period1, period2))
+
       try:
-        response = subprocess.check_output([self.notify, value],
+        response = subprocess.check_output([self.notify, value, period1, period2],
                                            stderr=subprocess.STDOUT).decode("utf-8")
         if response:
           self.debug("** Start of response **")
@@ -671,7 +680,7 @@ def init():
 
   GITHUB = "https://raw.github.com/MilhouseVH/autoaway.py/master/"
   ANALYTICS = "http://goo.gl/ZTe1mN"
-  VERSION = "0.0.8"
+  VERSION = "0.0.9"
 
   parser = argparse.ArgumentParser(description="Manage auto-away status based on presence of mobile devices",
                     formatter_class=lambda prog: argparse.HelpFormatter(prog,max_help_position=25,width=90))
@@ -692,7 +701,7 @@ def init():
 
   group = parser.add_mutually_exclusive_group()
   group.add_argument("-ce", "--check-every", metavar="MIUNUTES", type=int, choices=range(1,61), \
-                      help="Schedule device checks at regular MINUTES intervals, eg. 5, or 10. Range 1..60. Default is 15.")
+                      help="Schedule device checks at regular MINUTES interval, eg. 5, or 10. Range 1..60. Default is 15.")
   group.add_argument("-os", "--occupied-sleep", metavar="SECONDS", type=int, \
                       help="Alternative sleep interval used when property is oocupied. Specified in seconds. \
                             Less regular than --check-every.")
@@ -701,7 +710,8 @@ def init():
 
   parser.add_argument("-n", "--notify", metavar="FILENAME", \
                       help="Execute FILENAME when change of occupancy occurs - passed \
-                      \"here\" or \"away\" as argument")
+                      \"here\" or \"away\" as arg1, here/away period in seconds as arg2 and \
+                      here/away period in \"d h:m:s\" format as arg3")
 
   parser.add_argument("-s", "--subnet", metavar="SUBNET", \
                       help="If only MAC addresses are specified, ping flood the subnet to resolve IP addresses. \
