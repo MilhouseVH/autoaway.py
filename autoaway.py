@@ -97,6 +97,7 @@ class AutoAway(object):
     self.last_seen = 0
     self.first_seen = 0
     self.first_notseen = 0
+    self.start_graceperiod = 0
 
     self.time_occupied = 0
     self.time_vacant = 0
@@ -117,6 +118,8 @@ class AutoAway(object):
   def PropertyIsOccupied(self):
     is_occupied = self.get_status()
 
+    check_start = int(time.time())
+
     # If transitioning from seen to not seen, check up to 3 more times
     # to avoid false positives
     if not is_occupied and self.DevicesSeen():
@@ -128,20 +131,20 @@ class AutoAway(object):
         self.debug("Potential occupancy transition - extra check %d of %d" % (i, CHECK_MAX))
         is_occupied = self.get_status()
 
-    now = int(time.time())
     if is_occupied:
       self.debug("Occupancy Check: %s (one or more devices within property)" % is_occupied)
+      self.set_status(True)
     else:
-      if self.first_notseen > 0:
-        gp_remaining = self.grace_period_secs - (now - self.first_notseen)
-      else:
-        gp_remaining = self.grace_period_secs
+      now = int(time.time())
+      if self.start_graceperiod == 0:
+        self.start_graceperiod = check_start
+      gp_remaining = self.grace_period_secs - (now - self.start_graceperiod)
       gp_msg = "elapsed" if gp_remaining <= 0 else self.secsToTime(gp_remaining, "%dm %02ds")
       self.debug("Occupancy Check: %s (no devices within property, grace period remaining: %s)" % (is_occupied, gp_msg))
+      if gp_remaining <= 0:
+        self.set_status(False)
 
-    self.set_status(is_occupied)
-
-    if self.first_notseen != 0 and (now - self.first_notseen) >= self.grace_period_secs:
+    if self.first_notseen != 0:
       return False
     else:
       return True
@@ -157,6 +160,15 @@ class AutoAway(object):
 
   def GetVacantPeriod(self):
     return self.secsToTime(self.time_vacant)
+  def GetVacantStart(self):
+    return datetime.datetime.fromtimestamp(self.first_seen - self.time_vacant)
+  def GetVacantEnd(self):
+    return datetime.datetime.fromtimestamp(self.first_seen)
+
+  def GetOccupiedStart(self):
+    return datetime.datetime.fromtimestamp(self.first_notseen - self.time_occupied)
+  def GetOccupiedEnd(self):
+    return datetime.datetime.fromtimestamp(self.first_notseen)
 
   def ExecuteNotification(self, isOccupied):
     if self.notify:
@@ -241,9 +253,10 @@ class AutoAway(object):
 
     if isOccupied:
       self.last_seen = now
+      self.start_graceperiod = 0
 
       if self.first_seen == 0:
-        self.first_seen = self.last_seen
+        self.first_seen = now
 
       if self.first_notseen != 0:
         self.time_vacant = self.first_seen - self.first_notseen
@@ -252,7 +265,10 @@ class AutoAway(object):
       self.last_notseen = now
 
       if self.first_notseen == 0:
-        self.first_notseen = self.last_notseen
+        if self.start_graceperiod != 0:
+          self.first_notseen = self.start_graceperiod
+        else:
+          self.first_notseen = now
 
       if self.first_seen != 0:
         self.time_occupied = self.first_notseen - self.first_seen
@@ -680,7 +696,7 @@ def init():
 
   GITHUB = "https://raw.github.com/MilhouseVH/autoaway.py/master/"
   ANALYTICS = "http://goo.gl/ZTe1mN"
-  VERSION = "0.0.9"
+  VERSION = "0.1.0"
 
   parser = argparse.ArgumentParser(description="Manage auto-away status based on presence of mobile devices",
                     formatter_class=lambda prog: argparse.HelpFormatter(prog,max_help_position=25,width=90))
@@ -696,7 +712,7 @@ def init():
   parser.add_argument("-ope", "--offpeakend", metavar="HH:MM", \
                       help="Off peak period end, eg. 08:00. Device communication will \
                             be disabled during the off peak period unless no devices are \
-                            present prior to off peak commencing..Use 24-hour notation for HH:MM. \
+                            present prior to off peak commencing. Use 24-hour notation for HH:MM. \
                             Both a start and end time must be specified for off-peak to be enabled.")
 
   group = parser.add_mutually_exclusive_group()
@@ -783,9 +799,11 @@ def printlog(msg):
 
 def OccupancyChange(autoaway, isOccupied):
   if isOccupied:
-    printlog("Property is occupied - vacant for %s" % autoaway.GetVacantPeriod())
+    printlog("Property is occupied - vacant for %s (from %s - %s)" %
+      (autoaway.GetVacantPeriod(), autoaway.GetVacantStart(), autoaway.GetVacantEnd()))
   else:
-    printlog("Property is vacant - occupied for %s" % autoaway.GetOccupiedPeriod())
+    printlog("Property is vacant - occupied for %s (from %s - %s)" %
+      (autoaway.GetOccupiedPeriod(), autoaway.GetOccupiedStart(), autoaway.GetOccupiedEnd()))
 
   autoaway.ExecuteNotification(isOccupied)
 

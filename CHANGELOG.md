@@ -1,5 +1,8 @@
 #Changelog
 
+##Version 0.1.0 (05/12/2013)
+* Chg: Elapsed time while occupied shouldn't be reset by away detection that doesn't exceed grace period (ie. home for 5 hours, detected as away for 5 minutes during a 15 minute grace period, then away after another 2 hours is 7h05m occupied, not 2h00m).
+
 ##Version 0.0.9 (19/11/2013)
 * Add: Extra arguments on call to --notify script, now pass arg1: status (away/here), arg2: here/away period in seconds, arg3: here/away period in "d h:m:s" format.
 

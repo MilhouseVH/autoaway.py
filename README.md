@@ -44,7 +44,7 @@ optional arguments:
   -ope HH:MM, --offpeakend HH:MM
                          Off peak period end, eg. 08:00. Device communication will be
                          disabled during the off peak period unless no devices are present
-                         prior to off peak commencing..Use 24-hour notation for HH:MM.
+                         prior to off peak commencing. Use 24-hour notation for HH:MM.
                          Both a start and end time must be specified for off-peak to be
                          enabled.
   -ce MIUNUTES, --check-every MIUNUTES
@@ -85,7 +85,7 @@ Version upgrade:
 ####Default values:
 ```
 --grace           15  (minutes)
---occupied-sleep  900 (seconds)
+--check-every     15  (minutes)
 --vacant-sleep    15  (seconds)
 --pings           1
 ```
